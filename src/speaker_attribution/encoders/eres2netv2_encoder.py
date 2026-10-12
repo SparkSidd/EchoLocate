@@ -162,19 +162,25 @@ class ERes2NetV2Encoder(SpeakerEncoder):
         self._device = torch.device(device if torch.cuda.is_available() and device != "cpu" else "cpu")
         self._dim = embedding_dim
         self._onnx_sess = None
+        self._checkpoint_hash: Optional[str] = None
 
         # Attempt to load pre-trained ONNX model if available and dimension matches (512)
         onnx_path = Path("demo_data/models/eres2net/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx")
         if onnx_path.exists() and self._dim == 512:
             try:
+                import hashlib
                 import onnxruntime as ort
                 opts = ort.SessionOptions()
                 opts.intra_op_num_threads = 2
                 self._onnx_sess = ort.InferenceSession(str(onnx_path), sess_options=opts)
+                with open(onnx_path, "rb") as f:
+                    self._checkpoint_hash = hashlib.sha256(f.read()).hexdigest()
                 logger.info("Loaded pre-trained ERes2Net ONNX model from %s", onnx_path)
             except Exception as e:
                 logger.warning("Could not initialize ERes2Net ONNX: %s. Using internal architecture.", e)
                 self._onnx_sess = None
+                self._checkpoint_hash = None
+
 
         self._model = ERes2NetV2Net(feat_dim=80, embedding_dim=self._dim)
         self._model.to(self._device)
@@ -258,3 +264,6 @@ class ERes2NetV2Encoder(SpeakerEncoder):
 
     def model_name(self) -> str:
         return "eres2netv2"
+
+    def checkpoint_hash(self) -> Optional[str]:
+        return self._checkpoint_hash

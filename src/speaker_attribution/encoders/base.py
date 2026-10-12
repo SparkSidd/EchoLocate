@@ -61,3 +61,30 @@ class SpeakerEncoder(ABC):
     def model_name(self) -> str:
         """Return unique model architecture identifier."""
         pass
+
+    def checkpoint_hash(self) -> Optional[str]:
+        """Return SHA256 hex digest of active model weights, or None if unavailable/unhashed."""
+        return None
+
+    def frontend_config(self) -> dict:
+        """Return feature extraction and preprocessing configuration dictionary."""
+        return {
+            "sample_rate": 16000,
+            "feature_type": "kaldi_80_cmn",
+            "num_mel_bins": 80,
+            "cmn": True,
+        }
+
+    def provenance(self) -> "ModelProvenance":
+        """Construct ModelProvenance for embeddings produced by this encoder."""
+        from ..types import ModelProvenance
+        c_hash = self.checkpoint_hash()
+        return ModelProvenance(
+            model_name=self.model_name(),
+            embedding_dim=self.embedding_dimension(),
+            checkpoint_hash=c_hash,
+            frontend_version="kaldi_80_cmn",
+            sample_rate=16000,
+            is_verified=c_hash is not None,
+            status="verified" if c_hash is not None else "unverified_weights",
+        )

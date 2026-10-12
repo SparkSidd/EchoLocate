@@ -17,7 +17,7 @@ import numpy as np
 
 from ..encoders.base import SpeakerEncoder
 from ..preprocessing.audio_processor import AudioProcessor
-from ..types import SpeakerProfile
+from ..types import ModelProvenance, SpeakerProfile
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +46,66 @@ class SpeakerEnrollmentDB:
         if self.db_dir is not None and self.db_dir.exists():
             self.load()
 
+    def validate_compatibility(
+        self,
+        speaker_id: str,
+        embedding_dim: int,
+        model_name: str,
+        provenance: Optional[Union[ModelProvenance, Dict[str, Any]]] = None,
+    ) -> None:
+        """
+        Validate that an incoming embedding configuration is compatible with an existing profile.
+        Raises ValueError if dimension, model architecture, or checkpoint hash diverges.
+        """
+        if speaker_id not in self._profiles:
+            return
+
+        existing = self._profiles[speaker_id]
+        if existing.embedding_dim != embedding_dim:
+            raise ValueError(
+                f"Embedding dimension mismatch for speaker '{speaker_id}': "
+                f"existing profile is {existing.embedding_dim}-dim, incoming embedding is {embedding_dim}-dim."
+            )
+        if existing.model_name != model_name:
+            raise ValueError(
+                f"Model architecture mismatch for speaker '{speaker_id}': "
+                f"existing profile uses '{existing.model_name}', incoming embedding uses '{model_name}'. "
+                f"Cross-model embedding mixing is strictly disallowed."
+            )
+
+        if isinstance(provenance, dict):
+            prov = ModelProvenance.from_dict(provenance)
+        elif isinstance(provenance, ModelProvenance):
+            prov = provenance
+        else:
+            prov = None
+
+        if (
+            existing.provenance
+            and existing.provenance.checkpoint_hash
+            and prov
+            and prov.checkpoint_hash
+            and existing.provenance.checkpoint_hash != prov.checkpoint_hash
+        ):
+            raise ValueError(
+                f"Checkpoint mismatch for speaker '{speaker_id}': "
+                f"existing profile has hash '{existing.provenance.checkpoint_hash[:12]}...', "
+                f"incoming embedding has hash '{prov.checkpoint_hash[:12]}...'. "
+                f"Mixing embeddings from different checkpoint weights is disallowed."
+            )
+
     def enroll_embedding(
         self,
         speaker_id: str,
         embedding: np.ndarray,
         model_name: str,
+        provenance: Optional[Union[ModelProvenance, Dict[str, Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SpeakerProfile:
         """
         Enroll a single speaker embedding vector.
         If the speaker is already enrolled, updates the centroid incrementally.
+        Guarantees model provenance alignment and prevents cross-model embedding corruption.
         """
         # Ensure L2-normalized float32
         norm = np.linalg.norm(embedding)
@@ -67,14 +117,31 @@ class SpeakerEnrollmentDB:
         meta = metadata or {}
         q_weight = compute_quality_weight(meta)
 
+        # Normalize incoming provenance
+        if isinstance(provenance, dict):
+            prov = ModelProvenance.from_dict(provenance)
+        elif isinstance(provenance, ModelProvenance):
+            prov = provenance
+        else:
+            prov = None
+
+        # Pre-validate compatibility
+        self.validate_compatibility(
+            speaker_id=speaker_id,
+            embedding_dim=len(emb),
+            model_name=model_name,
+            provenance=prov,
+        )
+
         if speaker_id in self._profiles:
             existing = self._profiles[speaker_id]
-            if existing.model_name != model_name:
+
+            # 4. Legacy warning
+            if existing.is_legacy:
                 logger.warning(
-                    "Model mismatch during enrollment for %s: existing is %s, new is %s.",
+                    "Enrolling into legacy/unverified profile '%s' (lacks verified historical checkpoint hash). "
+                    "Preserving profile continuity.",
                     speaker_id,
-                    existing.model_name,
-                    model_name,
                 )
 
             # Duplicate enrollment check (Phase 10)
@@ -106,6 +173,7 @@ class SpeakerEnrollmentDB:
                 "last_updated": time.time(),
             }
 
+            profile_prov = prov or existing.provenance
             profile = SpeakerProfile(
                 speaker_id=speaker_id,
                 centroid=new_centroid,
@@ -115,6 +183,7 @@ class SpeakerEnrollmentDB:
                 created_at=existing.created_at,
                 metadata=updated_meta,
                 embeddings=all_embs,
+                provenance=profile_prov,
             )
         else:
             weights = [q_weight]
@@ -127,15 +196,17 @@ class SpeakerEnrollmentDB:
                 created_at=time.time(),
                 metadata={**meta, "sample_weights": weights},
                 embeddings=[emb],
+                provenance=prov,
             )
 
         self._profiles[speaker_id] = profile
         logger.info(
-            "Enrolled speaker '%s' (samples: %d, dim: %d, model: %s)",
+            "Enrolled speaker '%s' (samples: %d, dim: %d, model: %s, verified: %s)",
             speaker_id,
             profile.sample_count,
             profile.embedding_dim,
             profile.model_name,
+            profile.is_verified,
         )
         return profile
 
@@ -149,7 +220,7 @@ class SpeakerEnrollmentDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SpeakerProfile:
         """
-        Preprocess audio, extract embedding via encoder, and update enrolled centroid.
+        Preprocess audio, extract embedding via encoder, and update enrolled centroid with provenance.
         """
         if preprocessor is not None:
             seg = preprocessor.process(audio, sample_rate=sample_rate)
@@ -160,10 +231,12 @@ class SpeakerEnrollmentDB:
             sr = sample_rate
 
         emb = encoder.embed(proc_audio, sample_rate=sr)
+        prov = encoder.provenance() if hasattr(encoder, "provenance") else None
         return self.enroll_embedding(
             speaker_id=speaker_id,
             embedding=emb,
             model_name=encoder.model_name(),
+            provenance=prov,
             metadata=metadata,
         )
 
@@ -173,11 +246,12 @@ class SpeakerEnrollmentDB:
         embeddings: List[np.ndarray],
         model_name: str,
         weights: Optional[List[float]] = None,
+        provenance: Optional[Union[ModelProvenance, Dict[str, Any]]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> SpeakerProfile:
         """
         Compute batch centroid over multiple enrollment samples at once.
-        Supports quality-weighted centroid (Phase 7 & Phase 9).
+        Supports quality-weighted centroid (Phase 7 & Phase 9) and model provenance.
         """
         if not embeddings:
             raise ValueError("No embeddings provided for enrollment")
@@ -195,6 +269,13 @@ class SpeakerEnrollmentDB:
         if weights is not None:
             meta["sample_weights"] = list(weights)
 
+        if isinstance(provenance, dict):
+            prov = ModelProvenance.from_dict(provenance)
+        elif isinstance(provenance, ModelProvenance):
+            prov = provenance
+        else:
+            prov = None
+
         profile = SpeakerProfile(
             speaker_id=speaker_id,
             centroid=centroid,
@@ -204,9 +285,11 @@ class SpeakerEnrollmentDB:
             created_at=time.time(),
             metadata=meta,
             embeddings=list(stacked),
+            provenance=prov,
         )
         self._profiles[speaker_id] = profile
         return profile
+
 
     def get_profile(self, speaker_id: str) -> Optional[SpeakerProfile]:
         return self._profiles.get(speaker_id)
@@ -256,6 +339,7 @@ class SpeakerEnrollmentDB:
                 "model_name": prof.model_name,
                 "created_at": prof.created_at,
                 "metadata": prof.metadata,
+                "provenance": prof.provenance.to_dict() if prof.provenance else None,
             }
 
             # Also maintain individual speaker directory: <target_dir>/<speaker_id>/
@@ -274,6 +358,7 @@ class SpeakerEnrollmentDB:
                 "created_at": prof.created_at,
                 "last_updated": prof.metadata.get("last_updated", time.time()),
                 "metadata": prof.metadata,
+                "provenance": prof.provenance.to_dict() if prof.provenance else None,
             }
             with open(spk_dir / "profile.json", "w", encoding="utf-8") as pf:
                 json.dump(spk_profile, pf, indent=2)
@@ -308,6 +393,22 @@ class SpeakerEnrollmentDB:
                             embeddings = [e for e in np.load(emb_arr_file)]
                         except Exception:
                             pass
+
+                    prov_data = data.get("provenance")
+                    if prov_data:
+                        prov = ModelProvenance.from_dict(prov_data)
+                    else:
+                        prov = ModelProvenance(
+                            model_name=data.get("model_name", "unknown"),
+                            embedding_dim=data.get("embedding_dim", len(centroid)),
+                            checkpoint_hash=None,
+                            frontend_version="unknown",
+                            sample_rate=16000,
+                            is_verified=False,
+                            status="legacy_unverified",
+                        )
+                        logger.info("Loaded profile '%s' without cryptographic fingerprint; marked as legacy/unverified.", s_id)
+
                     self._profiles[s_id] = SpeakerProfile(
                         speaker_id=s_id,
                         centroid=centroid,
@@ -317,6 +418,7 @@ class SpeakerEnrollmentDB:
                         created_at=data.get("created_at", time.time()),
                         metadata=data.get("metadata", {}),
                         embeddings=embeddings,
+                        provenance=prov,
                     )
             logger.info("Loaded %d profiles from manifest %s", len(self._profiles), manifest_file)
             return
@@ -337,6 +439,22 @@ class SpeakerEnrollmentDB:
                             embeddings = [e for e in np.load(emb_arr_file)]
                         except Exception:
                             pass
+
+                    prov_data = data.get("provenance")
+                    if prov_data:
+                        prov = ModelProvenance.from_dict(prov_data)
+                    else:
+                        prov = ModelProvenance(
+                            model_name=data.get("model_name", "unknown"),
+                            embedding_dim=data.get("embedding_dim", len(centroid)),
+                            checkpoint_hash=None,
+                            frontend_version="unknown",
+                            sample_rate=16000,
+                            is_verified=False,
+                            status="legacy_unverified",
+                        )
+                        logger.info("Loaded directory profile '%s' without fingerprint; marked as legacy/unverified.", s_id)
+
                     self._profiles[s_id] = SpeakerProfile(
                         speaker_id=s_id,
                         centroid=centroid,
@@ -346,7 +464,9 @@ class SpeakerEnrollmentDB:
                         created_at=data.get("created_at", time.time()),
                         metadata=data.get("metadata", {}),
                         embeddings=embeddings,
+                        provenance=prov,
                     )
+
 
         # 2. Check for individual directory profiles: source_dir/*/profile.json
         for prof_path in source_dir.glob("*/profile.json"):

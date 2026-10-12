@@ -173,23 +173,34 @@ class ECAPAEncoder(SpeakerEncoder):
         self._device = torch.device(self._device_str)
         self._dim = embedding_dim
         self._classifier = None
+        self._checkpoint_hash: Optional[str] = None
 
         # Attempt to load pre-trained SpeechBrain model
         try:
+            import hashlib
             from speechbrain.inference.speaker import EncoderClassifier
             from speechbrain.utils.fetching import LocalStrategy
             save_dir = Path("demo_data/models/speechbrain_ecapa")
             save_dir.mkdir(parents=True, exist_ok=True)
+            ckpt_path = save_dir / "embedding_model.ckpt"
+            if ckpt_path.exists():
+                with open(ckpt_path, "rb") as f:
+                    self._checkpoint_hash = hashlib.sha256(f.read()).hexdigest()
             self._classifier = EncoderClassifier.from_hparams(
                 source="speechbrain/spkrec-ecapa-voxceleb",
                 savedir=str(save_dir),
                 run_opts={"device": self._device_str},
                 local_strategy=LocalStrategy.COPY,
             )
+            if self._checkpoint_hash is None and ckpt_path.exists():
+                with open(ckpt_path, "rb") as f:
+                    self._checkpoint_hash = hashlib.sha256(f.read()).hexdigest()
             logger.info("Loaded pre-trained SpeechBrain ECAPA-TDNN VoxCeleb model")
         except Exception as e:
             logger.warning("Could not initialize SpeechBrain ECAPA: %s. Using internal architecture.", e)
             self._classifier = None
+            self._checkpoint_hash = None
+
 
         self._model = ECAPATDNNNet(feat_dim=80, channels=channels, embedding_dim=self._dim)
         self._model.to(self._device)
@@ -275,3 +286,6 @@ class ECAPAEncoder(SpeakerEncoder):
 
     def model_name(self) -> str:
         return "ecapa"
+
+    def checkpoint_hash(self) -> Optional[str]:
+        return self._checkpoint_hash

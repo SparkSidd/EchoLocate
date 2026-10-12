@@ -48,6 +48,41 @@ class CandidateScore:
 
 
 @dataclass
+class ModelProvenance:
+    """Provenance tracking for speaker embedding models and feature configuration."""
+    model_name: str
+    embedding_dim: int
+    checkpoint_hash: Optional[str] = None
+    frontend_version: str = "kaldi_80_cmn"
+    sample_rate: int = 16000
+    is_verified: bool = True
+    status: str = "verified"  # "verified" or "legacy_unverified"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "model_name": self.model_name,
+            "embedding_dim": self.embedding_dim,
+            "checkpoint_hash": self.checkpoint_hash,
+            "frontend_version": self.frontend_version,
+            "sample_rate": self.sample_rate,
+            "is_verified": self.is_verified,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> ModelProvenance:
+        return cls(
+            model_name=d.get("model_name", "unknown"),
+            embedding_dim=int(d.get("embedding_dim", 0)),
+            checkpoint_hash=d.get("checkpoint_hash"),
+            frontend_version=d.get("frontend_version", "unknown"),
+            sample_rate=int(d.get("sample_rate", 16000)),
+            is_verified=bool(d.get("is_verified", False)),
+            status=d.get("status", "legacy_unverified"),
+        )
+
+
+@dataclass
 class SpeakerProfile:
     """Enrolled speaker profile containing normalized centroid and metadata."""
     speaker_id: str
@@ -58,11 +93,21 @@ class SpeakerProfile:
     created_at: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
     embeddings: List[np.ndarray] = field(default_factory=list)
+    provenance: Optional[ModelProvenance] = None
 
     def __post_init__(self):
         norm = np.linalg.norm(self.centroid)
         if norm > 1e-9:
             self.centroid = (self.centroid / norm).astype(np.float32)
+
+    @property
+    def is_verified(self) -> bool:
+        return self.provenance.is_verified if self.provenance is not None else False
+
+    @property
+    def is_legacy(self) -> bool:
+        return not self.is_verified
+
 
 
 @dataclass

@@ -122,22 +122,21 @@ class DemonstrationSession:
         )
 
         self.blind_tests: List[BlindTestCase] = []
-        # Ensure enrolled centroids always match active encoder dimensionality at startup
-        self._sync_enrolled_embeddings()
+        # Ensure enrolled centroids match active encoder dimensionality at startup without mutating disk profiles
+        self._sync_enrolled_embeddings(force=False, persist=False)
 
-    def _sync_enrolled_embeddings(self, force: bool = False) -> None:
+    def _sync_enrolled_embeddings(self, force: bool = False, persist: bool = False) -> None:
         """
         Verify that all enrolled speaker centroids match the active encoder's
         embedding dimension. If any mismatch is detected (e.g. after model switch
         or server restart), dynamically recompute centroids from saved WAV recordings.
+        Does not mutate on-disk profiles unless persist=True is explicitly specified.
         """
         import soundfile as sf
         target_dim = self.encoder.embedding_dimension()
         need_sync = force
         if not need_sync:
             enrolled_spks = self.db.get_enrolled_speakers()
-            if not enrolled_spks:
-                need_sync = True
             for s_id in enrolled_spks:
                 prof = self.db.get_profile(s_id)
                 if prof and (prof.embedding_dim != target_dim or prof.model_name != self.model_name or len(prof.embeddings) == 0):
@@ -148,7 +147,7 @@ class DemonstrationSession:
             return
 
         logger.info(
-            "Synchronizing enrolled speaker centroids to active model '%s' (dim: %d)",
+            "Synchronizing enrolled speaker centroids in memory to active model '%s' (dim: %d)",
             self.model_name,
             target_dim,
         )
@@ -158,6 +157,7 @@ class DemonstrationSession:
                 if spk_d.is_dir() and (spk_d / "recordings").exists():
                     spk_ids.add(spk_d.name)
 
+        prov = self.encoder.provenance() if hasattr(self.encoder, "provenance") else None
         for s_id in sorted(list(spk_ids)):
             prof = self.db.get_profile(s_id)
             rec_dir = self.db_dir / s_id / "recordings"
@@ -183,9 +183,11 @@ class DemonstrationSession:
                     embeddings=embs,
                     weights=weights,
                     model_name=self.model_name,
+                    provenance=prov,
                     metadata=prof.metadata if prof else {},
                 )
-        self.db.save()
+        if persist:
+            self.db.save()
 
     def enroll_sample(
         self,
@@ -202,7 +204,17 @@ class DemonstrationSession:
         if not quality.passed and not allow_override_quality:
             return False, quality, None
 
-        # 1. Save local WAV recording
+        # 1. Embed and pre-validate compatibility with existing profile before disk operations
+        emb = self.encoder.embed(audio)
+        prov = self.encoder.provenance() if hasattr(self.encoder, "provenance") else None
+        self.db.validate_compatibility(
+            speaker_id=speaker_id,
+            embedding_dim=len(emb),
+            model_name=self.model_name,
+            provenance=prov,
+        )
+
+        # 2. Save local WAV recording atomically
         spk_dir = self.db_dir / speaker_id
         rec_dir = spk_dir / "recordings"
         rec_dir.mkdir(parents=True, exist_ok=True)
@@ -210,49 +222,54 @@ class DemonstrationSession:
         sample_num = len(existing_wavs) + 1
         wav_filename = f"{sample_num:03d}.wav"
         wav_path = rec_dir / wav_filename
-
         rel_path = f"recordings/{wav_filename}"
+
+        saved_wav = False
         try:
             import soundfile as sf
             sf.write(str(wav_path), audio, 16000, subtype="PCM_16")
-        except Exception as e:
-            logger.warning("Failed to save local WAV file %s: %s", wav_path, e)
+            saved_wav = True
 
-        # 2. Track recordings history in profile metadata
-        existing_prof = self.db.get_profile(speaker_id)
-        existing_recs = []
-        if existing_prof and existing_prof.metadata:
-            existing_recs = list(existing_prof.metadata.get("recordings", []))
-        if rel_path not in existing_recs:
-            existing_recs.append(rel_path)
+            # 3. Track recordings history in profile metadata
+            existing_prof = self.db.get_profile(speaker_id)
+            existing_recs = []
+            if existing_prof and existing_prof.metadata:
+                existing_recs = list(existing_prof.metadata.get("recordings", []))
+            if rel_path not in existing_recs:
+                existing_recs.append(rel_path)
 
-        emb = self.encoder.embed(audio)
-        profile = self.db.enroll_embedding(
-            speaker_id=speaker_id,
-            embedding=emb,
-            model_name=self.model_name,
-            metadata={
-                "display_name": display_name,
-                "recordings": existing_recs,
-                "speech_duration_sec": quality.speech_duration_sec,
-                "rms": quality.rms,
-                "snr_db": quality.snr_db,
-                "last_sample_file": rel_path,
-                "last_updated": time.time(),
-            },
-        )
-        self.db.save()
-        return True, quality, profile
+            profile = self.db.enroll_embedding(
+                speaker_id=speaker_id,
+                embedding=emb,
+                model_name=self.model_name,
+                provenance=prov,
+                metadata={
+                    "display_name": display_name,
+                    "recordings": existing_recs,
+                    "speech_duration_sec": quality.speech_duration_sec,
+                    "rms": quality.rms,
+                    "snr_db": quality.snr_db,
+                    "last_sample_file": rel_path,
+                    "last_updated": time.time(),
+                },
+            )
+            self.db.save()
+            return True, quality, profile
+        except Exception:
+            if saved_wav and wav_path.exists():
+                wav_path.unlink(missing_ok=True)
+            raise
 
-    def switch_model(self, model_name: str) -> None:
+    def switch_model(self, model_name: str, persist: bool = False) -> None:
         """
         Switch active speaker encoder and dynamically re-compute centroids for all
-        enrolled speakers using their preserved local WAV recordings.
+        enrolled speakers in memory using their preserved local WAV recordings.
+        Does not mutate on-disk profiles unless persist=True is explicitly requested.
         """
         self.model_name = model_name
         self.encoder = create_encoder(model_name)
         self.identifier.encoder = self.encoder
-        self._sync_enrolled_embeddings(force=True)
+        self._sync_enrolled_embeddings(force=True, persist=persist)
 
     def delete_speaker(self, speaker_id: str) -> bool:
         """Remove speaker profile, centroids, and all saved recordings from disk."""
@@ -284,11 +301,11 @@ class DemonstrationSession:
     ) -> Dict[str, Any]:
         """
         Identify speaker from live or recorded audio with timing diagnostics.
+        Inference is strictly read-only and does not mutate on-disk profiles or centroids.
         """
         t0 = time.perf_counter()
         quality = self.quality_checker.check(audio)
 
-        self._sync_enrolled_embeddings()
         raw_result = self.identifier.identify(audio)
         latency_ms = (time.perf_counter() - t0) * 1000.0
 
