@@ -1,0 +1,113 @@
+# EchoLocate — Experiment 4 Configuration
+# Learned Acoustic Feature Enhancement for Robust Speech Localization Under Reverberation
+
+experiment:
+  id: "experiment_04"
+  name: "learned_acoustic_feature_enhancement"
+  description: "Hybrid Neural-Geometric DeepGCC + SRP spatial likelihood localization under severe reverberation and voiced speech"
+  version: "1.0.0"
+
+reproducibility:
+  base_seed: 42
+  train_seed: 100
+  eval_seed: 200
+  deterministic: true
+
+# Physical Generator Baseline (True World)
+physical_world:
+  room_dimensions: [10.0, 6.0, 3.0]
+  speed_of_sound: 343.0
+  fs: 16000
+  max_order: 17
+  air_absorption: false
+  mic_positions_2d:
+    - [1.0, 1.5]
+    - [9.0, 1.5]
+    - [5.0, 4.5]
+  mic_height: 1.2
+  source_height: 1.2
+
+# Default Assumed Localization Model
+assumed_model:
+  room_dimensions: [10.0, 6.0, 3.0]
+  speed_of_sound: 343.0
+  grid_resolution_m: 0.05
+  boundary_margin_m: 0.10
+  subgrid_refinement: true
+  min_peak_separation_m: 0.50
+  top_k_peaks: 5
+
+# DeepGCC Model Architecture Parameters
+neural_model:
+  model_type: "deep_gcc_res1d"
+  in_channels: 1
+  hidden_channels: 64
+  num_res_blocks: 3
+  kernel_size: 5
+  dilation_rates: [1, 2, 4]
+  temperature: 0.10
+  target_sigma_samples: 1.0
+  max_tau_seconds: 0.030    # Max physical delay between microphones
+  num_tau_bins: 129         # Bounded symmetric lag axis
+
+training:
+  num_epochs: 30
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 1e-4
+  early_stopping_patience: 6
+  num_train_scenes: 600
+  num_val_scenes: 150
+  loss_weights:
+    lambda_kl: 1.0
+    lambda_tdoa: 0.5
+    lambda_ipd: 0.2
+
+benchmark_conditions:
+  - id: "Condition_A_Stable_Control"
+    target_rt60: 0.200
+    snr_target_db: 40.0
+  - id: "Condition_B_Transition_Edge"
+    target_rt60: 0.250
+    snr_target_db: 40.0
+  - id: "Condition_C_Severe_Multipath"
+    target_rt60: 0.300
+    snr_target_db: 20.0
+  - id: "Condition_D_Extreme_Breakdown"
+    target_rt60: 0.350
+    snr_target_db: 20.0
+
+trials_per_condition: 5
+
+source_signals:
+  eval_signals:
+    - "broadband_noise"
+    - "linear_chirp"
+    - "log_chirp"
+    - "speech_male_vowel"
+    - "speech_female_vowel"
+    - "speech_phrase_voiced"
+    - "impulsive_click"
+
+out_of_distribution:
+  offgrid_sources_count: 100
+  unseen_rt60_steps: [0.310, 0.380, 0.420, 0.490, 0.530]
+  unseen_rooms:
+    - id: "Room_Corridor"
+      dimensions: [15.0, 3.0, 3.0]
+      mics_2d: [[2.0, 1.5], [13.0, 1.5], [7.5, 2.5]]
+    - id: "Room_Square"
+      dimensions: [8.0, 8.0, 3.0]
+      mics_2d: [[1.5, 1.5], [6.5, 1.5], [4.0, 6.5]]
+    - id: "Room_Large_Hall"
+      dimensions: [15.0, 10.0, 4.0]
+      mics_2d: [[2.0, 2.0], [13.0, 2.0], [7.5, 8.0]]
+  mismatch_levels:
+    mic_jitter_cm: [0.0, 0.5, 1.0, 2.0]
+    speed_error_mps: [0.0, 2.0, 5.0, 10.0]
+    clock_jitter_us: [0.0, 10.0, 25.0, 50.0]
+
+metrics:
+  accuracy_thresholds_m: [0.10, 0.25, 0.50, 1.0, 2.0]
+  catastrophic_error_m: 2.0
+  peak_ambiguity_thresholds: [0.70, 0.80, 0.90]

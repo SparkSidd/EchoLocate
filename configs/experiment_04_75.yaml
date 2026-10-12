@@ -1,0 +1,134 @@
+# EchoLocate — Experiment 4.75 Configuration
+# Neural Calibration Stress Test, Cross-Domain Generalization & Adversarial Robustness Audit
+
+experiment_name: "experiment_04_75"
+description: "Strict adversarial evaluation of neural likelihood calibration, temperature transfer, and spatial training."
+
+seeds:
+  train_seed: 4501
+  val_seed: 9501
+  test_seed: 14501
+  adversarial_seed: 24501
+  blind_seed: 34501
+
+canonical_room:
+  dimensions: [10.0, 6.0, 3.0]
+  mics_2d:
+    - [2.0, 1.5]
+    - [8.0, 1.5]
+    - [5.0, 4.5]
+  mic_height: 1.2
+  source_height: 1.2
+  speed_of_sound: 343.0
+
+spatial_grid:
+  grid_resolution_m: 0.05
+  search_margin_m: 0.10
+  subgrid_refinement: true
+
+models:
+  exp4_checkpoint: "results/experiment_04/deep_gcc_model.pt"
+  calibrated_checkpoint: "results/experiment_04_5/calibrated_deep_gcc.pt"
+  hybrid_spatial_checkpoint: "results/experiment_04_5/hybrid_spatial_srp.pt"
+  optimal_temperature: 0.25
+  max_tau_seconds: 0.030
+  num_tau_bins: 129
+
+substudies:
+  substudy_a_control:
+    n_trials: 50
+    conditions:
+      - {id: "Condition_A_Stable", rt60: 0.15, snr: 20.0}
+      - {id: "Condition_B_Transition", rt60: 0.22, snr: 15.0}
+
+  substudy_b_offgrid:
+    n_sources: 300
+    rt60: 0.25
+    snr: 20.0
+
+  substudy_c_unseen_speech:
+    n_speakers: 8
+    pitch_bins: ["80-120", "120-180", "180-250", "250+"]
+    rt60_levels: [0.23, 0.31, 0.42, 0.56]
+    snr_levels: [40.0, 30.0, 20.0, 10.0]
+    n_trials_per_bin: 15
+
+  substudy_d_mic_perturbation:
+    magnitudes_mm: [0.0, 1.0, 2.0, 5.0, 10.0, 15.0, 20.0, 30.0, 50.0]
+    n_trials_per_mag: 30
+    rt60: 0.25
+    snr: 20.0
+
+  substudy_e_array_transfer:
+    geometries:
+      - name: "Geometry_A_Canonical"
+        mics: [[2.0, 1.5], [8.0, 1.5], [5.0, 4.5]]
+      - name: "Geometry_B_Scaled"
+        mics: [[3.0, 2.0], [7.0, 2.0], [5.0, 4.0]]
+      - name: "Geometry_C_Rotated_Translated"
+        mics: [[3.0, 1.0], [8.5, 2.5], [4.5, 5.0]]
+      - name: "Geometry_D_Asymmetric"
+        mics: [[1.5, 1.2], [7.8, 2.2], [4.2, 4.8]]
+      - name: "Geometry_E_Four_Mic"
+        mics: [[2.0, 1.5], [8.0, 1.5], [5.0, 4.5], [5.0, 1.5]]
+    n_trials_per_geom: 30
+
+  substudy_f_speed_mismatch:
+    delta_c_mps: [-10.0, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0]
+    n_trials_per_delta: 25
+
+  substudy_g_sync_jitter:
+    offsets_us: [0.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0]
+    n_trials_per_offset: 25
+
+  substudy_h_unseen_rooms:
+    rooms:
+      - name: "Room_1_Rectangular"
+        dims: [12.0, 8.0, 3.5]
+      - name: "Room_2_Narrow_Corridor"
+        dims: [15.0, 3.0, 2.8]
+      - name: "Room_3_Near_Square"
+        dims: [7.0, 6.5, 3.0]
+      - name: "Room_4_Large_Hall"
+        dims: [18.0, 12.0, 4.5]
+      - name: "Room_5_Asymmetric"
+        dims: [9.0, 7.5, 3.2]
+    n_trials_per_room: 30
+
+  substudy_i_unseen_rt60:
+    target_rt60s: [0.26, 0.28, 0.34, 0.38, 0.47, 0.52, 0.60]
+    n_trials_per_rt60: 25
+
+  substudy_j_signal_matrix:
+    signals:
+      - "broadband_noise"
+      - "linear_chirp"
+      - "log_chirp"
+      - "impulse"
+      - "tonal"
+      - "multi_tone"
+      - "voiced_speech"
+      - "unvoiced_speech"
+      - "sentence"
+    n_trials_per_signal: 30
+
+  substudy_k_pitch_stress:
+    f0_range: [80.0, 300.0]
+    f0_steps: 12
+    vibrato_depth_hz: 10.0
+    sweep_types: ["constant", "vibrato", "rising", "falling"]
+    n_trials_per_config: 10
+
+  substudy_l_temperature_transfer:
+    temperatures: [0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.75, 1.00]
+
+  substudy_m_geometric_equivariance:
+    rotations_deg: [0.0, 45.0, 90.0, 180.0]
+    translations_m: [[0.0, 0.0], [1.0, 0.5], [-0.5, 1.0]]
+    n_trials_per_transform: 20
+
+  substudy_n_confidence:
+    confidence_bins: 10
+
+  substudy_o_blind_validation:
+    n_blind_scenes: 500

@@ -1,0 +1,93 @@
+# EchoLocate — Experiment 5 Configuration
+# Real-World Validation, Sim-to-Real Transfer & Confidence-Gated Hybrid Localization
+
+experiment_name: "experiment_05"
+description: "Real-world dataset evaluation, sim-to-real transfer gap, and confidence-gated hybrid localization."
+
+seeds:
+  calibration_seed: 5501
+  validation_seed: 10501
+  test_seed: 15501
+  blind_real_seed: 25501
+
+models:
+  exp4_checkpoint: "results/experiment_04/deep_gcc_model.pt"
+  calibrated_checkpoint: "results/experiment_04_5/calibrated_deep_gcc.pt"
+  hybrid_spatial_checkpoint: "results/experiment_04_5/hybrid_spatial_srp.pt"
+  optimal_temperature: 0.25
+  max_tau_seconds: 0.030
+  num_tau_bins: 129
+
+datasets:
+  echolocate_real:
+    name: "EchoLocate_Real_Array"
+    topology: "planar_4mic"
+    nominal_mics_2d: [[2.0, 1.5], [8.0, 1.5], [5.0, 4.5], [5.0, 1.5]]
+    measured_mics_2d: [[2.002, 1.498], [7.998, 1.503], [5.001, 4.497], [4.999, 1.501]]
+    fs: 16000
+    speed_of_sound: 343.0
+
+  locata:
+    name: "LOCATA_Corpus"
+    topology: "planar_dicit_15mic"
+    # Deterministic pre-registered 4-channel corner/aperture sub-array
+    preregistered_4ch_subindices: [0, 4, 10, 14]
+    native_dimensions_m: [7.1, 9.8, 3.0]
+    fs: 16000
+
+  av16_3:
+    name: "AV16_3_Corpus"
+    topology: "circular_8mic"
+    radius_m: 0.10
+    # Deterministic pre-registered 4-channel cardinal sub-array (90 deg spacing)
+    preregistered_4ch_subindices: [0, 2, 4, 6]
+    native_dimensions_m: [3.6, 8.2, 2.4]
+    fs: 16000
+
+real_rooms:
+  room_r1_low_rev:
+    id: "R1_Low_Reverberation"
+    dimensions: [6.0, 4.5, 2.8]
+    rt60_target: 0.22
+    mics_2d: [[1.5, 1.0], [4.5, 1.0], [3.0, 3.5], [3.0, 1.0]]
+
+  room_r2_moderate_rev:
+    id: "R2_Moderate_Transition"
+    dimensions: [10.0, 6.0, 3.0]
+    rt60_target: 0.38
+    mics_2d: [[2.0, 1.5], [8.0, 1.5], [5.0, 4.5], [5.0, 1.5]]
+
+  room_r3_high_rev:
+    id: "R3_High_Multipath"
+    dimensions: [14.0, 9.0, 4.0]
+    rt60_target: 0.65
+    mics_2d: [[3.0, 2.0], [11.0, 2.0], [7.0, 7.0], [7.0, 2.0]]
+
+source_signals:
+  - "broadband_noise"
+  - "linear_chirp"
+  - "log_chirp"
+  - "male_speech"
+  - "female_speech"
+  - "impulsive_transient"
+  - "narrowband_tonal"
+  - "real_continuous_sentence"
+
+hybrid_gating:
+  threshold_gate:
+    min_neural_confidence: 0.70
+    min_confidence_margin: 0.15
+    max_srp_spatial_entropy: 3.5
+    min_spatial_peak_contrast: 1.40
+    max_disagreement_distance_m: 1.50
+
+  meta_gate:
+    feature_dim: 8
+    learning_rate: 0.01
+    epochs: 50
+
+evaluation:
+  n_trials_per_room_signal: 15
+  n_total_real_scenes: 360
+  subgrid_refinement: true
+  abstention_coverages: [1.0, 0.9, 0.8, 0.7, 0.6, 0.5]

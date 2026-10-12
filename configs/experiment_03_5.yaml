@@ -1,0 +1,114 @@
+# EchoLocate — Experiment 3.5 Configuration
+# Reality Check, Model-Mismatch, Generalization & Leakage Validation
+
+experiment:
+  id: "experiment_03_5"
+  name: "reality_check_model_mismatch_and_leakage_audit"
+  description: "Adversarial validation of SRP-PHAT under model mismatch, grid misalignment, and unseen conditions"
+  version: "1.0.0"
+
+reproducibility:
+  base_seed: 42
+  deterministic: true
+
+# Physical Generator Baseline (True World)
+physical_world:
+  room_dimensions: [10.0, 6.0, 3.0]
+  speed_of_sound: 343.0
+  fs: 16000
+  max_order: 17
+  air_absorption: false
+  mic_positions_2d:
+    - [1.0, 1.5]
+    - [9.0, 1.5]
+    - [5.0, 4.5]
+  mic_height: 1.2
+  source_height: 1.2
+
+# Default Assumed Localization Model
+assumed_model:
+  room_dimensions: [10.0, 6.0, 3.0]
+  speed_of_sound: 343.0
+  grid_resolution_m: 0.05
+  boundary_margin_m: 0.10
+  subgrid_refinement: true
+  min_peak_separation_m: 0.50
+  top_k_peaks: 5
+
+benchmark_conditions:
+  - id: "Condition_A_Stable_Control"
+    target_rt60: 0.200
+    snr_target_db: 40.0
+  - id: "Condition_B_Transition_Edge"
+    target_rt60: 0.250
+    snr_target_db: 40.0
+  - id: "Condition_C_Severe_Multipath"
+    target_rt60: 0.300
+    snr_target_db: 20.0
+  - id: "Condition_D_Extreme_Breakdown"
+    target_rt60: 0.350
+    snr_target_db: 20.0
+
+trials_per_condition: 5
+
+# Sub-study configurations
+study_b_grid_alignment:
+  num_offgrid_sources: 100
+  jitter_cm_list: [1.0, 2.5, 5.0, 10.0]
+  resolutions_m: [0.10, 0.05, 0.025, 0.01]
+
+study_d_mic_mismatch:
+  errors_cm: [0.0, 0.5, 1.0, 2.0, 5.0, 10.0]
+  realizations: 20
+
+study_e_speed_of_sound:
+  true_c: 343.0
+  assumed_c_list: [330.0, 335.0, 338.0, 340.0, 343.0, 346.0, 348.0, 350.0, 355.0]
+
+study_f_synchronization:
+  offsets_us: [0.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]
+
+study_g_room_mismatch:
+  dimension_percent_errors: [-10.0, -5.0, -2.0, 0.0, 2.0, 5.0, 10.0]
+  coordinate_offsets_m: [0.05, 0.10, 0.25, 0.50]
+
+study_i_signals:
+  signal_types:
+    - "linear_chirp"
+    - "log_chirp"
+    - "broadband_noise"
+    - "speech_synthetic"
+    - "impulsive_transient"
+    - "narrowband_low"    # 300-1000 Hz
+    - "narrowband_mid"    # 1000-3000 Hz
+    - "narrowband_high"   # 3000-7000 Hz
+
+study_j_unseen_sources:
+  count: 100
+  min_wall_distance_m: 0.50
+  min_mic_distance_m: 0.25
+
+study_k_unseen_rooms:
+  rooms:
+    - id: "Room_Corridor"
+      dimensions: [15.0, 3.0, 3.0]
+      mics_2d: [[2.0, 1.5], [13.0, 1.5], [7.5, 2.5]]
+    - id: "Room_Square"
+      dimensions: [8.0, 8.0, 3.0]
+      mics_2d: [[1.5, 1.5], [6.5, 1.5], [4.0, 6.5]]
+    - id: "Room_Large_Hall"
+      dimensions: [15.0, 10.0, 4.0]
+      mics_2d: [[2.0, 2.0], [13.0, 2.0], [7.5, 8.0]]
+
+study_l_channel_mismatch:
+  gain_mismatch_db: [0.0, 1.0, 3.0, 6.0]
+
+study_m_grid_oracle:
+  domain_scale_percent: [-20.0, -10.0, 0.0, 10.0, 20.0]
+
+study_n_blind_validation:
+  scenes_count: 50
+
+metrics:
+  accuracy_thresholds_m: [0.25, 0.50, 1.0, 2.0]
+  catastrophic_error_m: 2.0

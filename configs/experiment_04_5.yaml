@@ -1,0 +1,127 @@
+# EchoLocate — Experiment 4.5 Configuration
+# Neural Likelihood Calibration, Peak Contrast Optimization & Localization-Level Training
+
+experiment:
+  id: "experiment_04_5"
+  name: "Neural Likelihood Calibration, Peak Contrast Optimization & Localization-Level Training"
+  description: "Investigating the objective mismatch between pairwise DeepGCC delay likelihoods and 2D spatial localization"
+  version: "1.0.0"
+
+physical_world:
+  room_dimensions: [10.0, 6.0, 3.0]  # [Lx, Ly, Lz] in metres
+  mic_positions_2d:
+    - [2.0, 1.5]
+    - [8.0, 1.5]
+    - [5.0, 4.5]
+  mic_height: 1.5
+  source_height: 1.5
+  speed_of_sound: 343.0
+  fs: 16000
+  duration_seconds: 0.1
+  humidity: 0.50
+  temperature_celsius: 20.0
+
+reproducibility:
+  master_seed: 4500
+  train_seed: 4501
+  val_seed: 9501
+  test_seed: 14501
+
+conditions:
+  Condition_A_Stable_Control:
+    rt60_target: 0.23
+    snr_db: 35.0
+    absorption: 0.65
+    max_order: 8
+  Condition_B_Transition_Edge:
+    rt60_target: 0.31
+    snr_db: 25.0
+    absorption: 0.50
+    max_order: 11
+  Condition_C_Severe_Multipath:
+    rt60_target: 0.42
+    snr_db: 15.0
+    absorption: 0.36
+    max_order: 14
+  Condition_D_Extreme_Breakdown:
+    rt60_target: 0.56
+    snr_db: 10.0
+    absorption: 0.25
+    max_order: 17
+
+canonical_sources:
+  - id: "SRC_01"
+    pos: [2.0, 1.0]
+  - id: "SRC_02"
+    pos: [8.0, 1.0]
+  - id: "SRC_03"
+    pos: [5.0, 1.0]
+  - id: "SRC_04"
+    pos: [2.0, 3.0]
+  - id: "SRC_05"
+    pos: [8.0, 3.0]
+  - id: "SRC_06"
+    pos: [5.0, 3.0]
+  - id: "SRC_07"
+    pos: [3.5, 2.0]
+  - id: "SRC_08"
+    pos: [6.5, 2.0]
+  - id: "SRC_09"
+    pos: [3.5, 4.0]
+  - id: "SRC_10"
+    pos: [6.5, 4.0]
+  - id: "SRC_11"
+    pos: [5.0, 2.0]
+  - id: "SRC_12"
+    pos: [5.0, 5.0]
+  - id: "SRC_13"
+    pos: [1.5, 1.5]
+  - id: "SRC_14"
+    pos: [8.5, 1.5]
+  - id: "SRC_15"
+    pos: [5.0, 0.5]
+
+signal_types:
+  - "broadband_noise"
+  - "linear_chirp"
+  - "log_chirp"
+  - "speech_male_vowel"
+  - "speech_female_vowel"
+  - "impulsive_click"
+  - "narrowband_tonal"
+
+neural_model:
+  in_channels: 1
+  hidden_channels: 64
+  num_res_blocks: 4
+  kernel_size: 5
+  dilation_rates: [1, 2, 4, 1]
+  num_tau_bins: 129
+  max_tau_seconds: 0.030
+  temperature: 1.0
+
+# Experiment 4.5 Specific Ablations
+ablations:
+  sigma_sweep_ms: [0.5, 1.0, 2.0, 4.0, 8.0]
+  temperature_sweep: [0.10, 0.25, 0.50, 0.75, 1.0, 1.50, 2.0]
+  contrast_margins: [0.05, 0.10, 0.20, 0.30]
+
+training:
+  num_train_scenes: 400
+  num_val_scenes: 100
+  batch_size: 16
+  num_epochs: 25
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  early_stopping_patience: 6
+  loss_weights:
+    lambda_delay: 1.0
+    lambda_contrast: 0.5
+    lambda_entropy: 0.1
+    lambda_spatial: 1.0
+    lambda_position: 2.0
+
+spatial_grid:
+  grid_resolution_m: 0.05
+  search_margin_m: 0.10
+  soft_argmax_temperature: 0.10

@@ -1,0 +1,105 @@
+# EchoLocate — Experiment 3 Configuration
+# Steered Response Power with Phase Transform (SRP-PHAT) Spatial Likelihood Baseline
+
+experiment:
+  id: "experiment_03"
+  name: "spatial_likelihood_srp_phat_baseline"
+  description: "Comparative evaluation of 2D near-field SRP-PHAT spatial likelihood vs GCC-PHAT + NLS baseline"
+  version: "1.0.0"
+
+reproducibility:
+  base_seed: 42
+  deterministic: true
+
+room:
+  dimensions: [10.0, 6.0, 3.0]  # [width_x, length_y, height_z] in metres
+  speed_of_sound: 343.0         # m/s
+  fs: 16000                     # Hz
+  max_order: 17                 # Image-source reflection order
+  air_absorption: false         # Isolated reverberant multipath
+  ray_tracing: false
+
+microphones:
+  geometry_id: "Geometry_A_Baseline"
+  height: 1.2
+  positions_2d:
+    - [1.0, 1.5]
+    - [9.0, 1.5]
+    - [5.0, 4.5]
+
+source:
+  signal_type: "chirp"
+  height: 1.2
+  signal_parameters:
+    f_start: 300.0
+    f_end: 7000.0
+    duration: 0.1
+    amplitude: 1.0
+  canonical_positions_2d:
+    - id: "S01"
+      xy: [2.0, 1.0]
+    - id: "S02"
+      xy: [8.0, 1.0]
+    - id: "S03"
+      xy: [5.0, 1.0]
+    - id: "S04"
+      xy: [2.0, 3.0]
+    - id: "S05"
+      xy: [8.0, 3.0]
+    - id: "S06"
+      xy: [5.0, 3.0]
+    - id: "S07"
+      xy: [2.0, 5.0]
+    - id: "S08"
+      xy: [8.0, 5.0]
+    - id: "S09"
+      xy: [5.0, 5.0]
+    - id: "S10"
+      xy: [3.5, 2.0]
+    - id: "S11"
+      xy: [6.5, 2.0]
+    - id: "S12"
+      xy: [3.5, 4.0]
+    - id: "S13"
+      xy: [6.5, 4.0]
+    - id: "S14"
+      xy: [1.5, 4.5]
+    - id: "S15"
+      xy: [8.5, 4.5]
+
+conditions:
+  - id: "Condition_A_Stable_Control"
+    target_rt60: 0.200
+    snr_target_db: 40.0
+    description: "Stable baseline control regime"
+  - id: "Condition_B_Transition_Edge"
+    target_rt60: 0.250
+    snr_target_db: 40.0
+    description: "The transition edge / primary scientific benchmark"
+  - id: "Condition_C_Severe_Multipath"
+    target_rt60: 0.300
+    snr_target_db: 20.0
+    description: "Severe reverberation + realistic noise stress"
+  - id: "Condition_D_Extreme_Breakdown"
+    target_rt60: 0.350
+    snr_target_db: 20.0
+    description: "Extreme multipath breakdown regime"
+
+trials_per_condition: 5
+
+srp_phat:
+  grid_resolution_m: 0.05       # Standard fine search resolution (5 cm)
+  boundary_margin_m: 0.10       # Clearance from physical room walls
+  interpolation_method: "linear" # 'linear' or 'nearest'
+  subgrid_refinement: true      # 2D quadratic local peak interpolation
+  min_peak_separation_m: 0.50   # Minimum distance between Top-1 and Top-2 peaks
+  top_k_peaks: 5                # Number of competing spatial peaks to track
+
+resolution_ablation_study:
+  resolutions_m: [0.10, 0.05, 0.025] # Coarse (10 cm), Fine (5 cm), Ultra-Fine (2.5 cm)
+  condition_id: "Condition_B_Transition_Edge"
+
+evaluation:
+  catastrophic_failure_threshold_m: 2.0
+  accuracy_thresholds_m: [0.25, 0.50, 1.0, 2.0]
+  top_k_proximity_threshold_m: 0.50

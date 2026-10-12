@@ -1,0 +1,156 @@
+# =============================================================================
+# EchoLocate - Experiment 01 Configuration
+# =============================================================================
+# Acoustic Event Localization System
+# Experiment 1: Single Room, 3 Microphones, TDOA-based Source Localization
+#
+# All physical units:
+#   distances: metres (m)
+#   time:      seconds (s)
+#   frequency: Hz
+#   speed:     m/s
+# =============================================================================
+
+experiment:
+  name: "experiment_01"
+  description: "Baseline TDOA localization: anechoic vs. reverberant"
+  random_seed: 42
+
+# ---------------------------------------------------------------------------
+# Room geometry (rectangular, 2D localization, 3D simulation height ignored)
+# ---------------------------------------------------------------------------
+room:
+  dimensions: [10.0, 6.0, 3.0]   # [length_x, width_y, height_z] in metres
+  speed_of_sound: 343.0           # m/s (approximate at 20°C dry air)
+  sampling_rate: 16000            # Hz — sufficient for ~10.7ms TDOA resolution
+
+# ---------------------------------------------------------------------------
+# Reverberation settings
+# ---------------------------------------------------------------------------
+# Stage A: anechoic (no reflections / ideal free-field)
+# Stage B: reverberant (realistic indoor RT60)
+stage_a:
+  mode: "anechoic"
+  max_order: 0          # Image-source model reflection order 0 = direct path only
+  noise_level_db: -60   # Noise 60dB below signal power (SNR = +60dB), essentially silent
+
+stage_b:
+  mode: "reverberant"
+  rt60: 0.4             # Reverberation time T60 in seconds (typical office/hostel)
+  max_order: 17         # pyroomacoustics Sabine-derived reflection order
+  noise_level_db: -30   # Moderate noise
+
+# ---------------------------------------------------------------------------
+# Microphone array
+#
+# Geometry: Non-collinear triangular arrangement inside a 10m x 6m room.
+# Rationale:
+#   - Three non-collinear microphones are the minimum for 2D localization.
+#   - Collinear arrays can only resolve a 1D direction (bearing ambiguity).
+#   - This triangular layout creates a well-conditioned geometry:
+#       M1 = left wall, lower half     (1.0, 1.5)
+#       M2 = right wall, lower half    (9.0, 1.5)
+#       M3 = centre, upper half        (5.0, 4.5)
+#   - Baseline M1-M2 = 8.0m (long baseline for good azimuth resolution)
+#   - M3 is off-axis (not collinear) for 2D disambiguation
+#   - All mics at 1.2m height (ear/device level) in 3D simulation
+# ---------------------------------------------------------------------------
+microphones:
+  height: 1.2   # z-coordinate for 3D simulation (metres)
+  positions:    # [x, y] in the horizontal plane (2D localization plane)
+    M1: [1.0, 1.5]
+    M2: [9.0, 1.5]
+    M3: [5.0, 4.5]
+
+# ---------------------------------------------------------------------------
+# Source signal
+#
+# Choice: Linear chirp (frequency sweep)
+# Rationale:
+#   - A chirp sweeps from f_low to f_high across its duration.
+#   - This gives a broadband signal with clear energy at all frequencies.
+#   - GCC-PHAT is well-conditioned for broadband signals.
+#   - The short duration (few ms) gives a compact, impulse-like time-domain
+#     envelope for clean time-of-arrival reading.
+#   - Chirps avoid the spectral flatness problem of pure tones and the
+#     randomness of white noise bursts.
+# ---------------------------------------------------------------------------
+source:
+  type: "chirp"           # Options: chirp, click, gaussian_pulse
+  duration: 0.005         # seconds (5 ms — short and broadband)
+  f_low: 300              # Hz — lower chirp frequency
+  f_high: 7000            # Hz — upper chirp frequency (stays below Nyquist/2)
+  amplitude: 1.0          # Normalised amplitude
+  pad_before: 0.01        # seconds of silence before chirp
+  pad_after: 0.15         # seconds of silence after chirp (capture reverb tail)
+
+# ---------------------------------------------------------------------------
+# Single-source validation position (used in Step 7–10)
+# ---------------------------------------------------------------------------
+single_source:
+  position: [5.0, 3.0]   # Centre of room (x, y) in metres
+
+# ---------------------------------------------------------------------------
+# Multi-source grid experiment (at least 10 positions)
+# ---------------------------------------------------------------------------
+multi_source:
+  num_positions: 15
+  min_distance_from_mic: 0.5   # Avoid degenerate close-range cases (metres)
+  margin_from_wall: 0.5        # Minimum distance from room boundary (metres)
+  # Positions will be generated deterministically from random_seed above.
+  # A predefined list is also provided for reproducibility:
+  positions:
+    - [2.0, 1.0]
+    - [8.0, 1.0]
+    - [5.0, 1.0]
+    - [2.0, 3.0]
+    - [8.0, 3.0]
+    - [5.0, 3.0]
+    - [2.0, 5.0]
+    - [8.0, 5.0]
+    - [5.0, 5.0]
+    - [3.5, 2.0]
+    - [6.5, 2.0]
+    - [3.5, 4.0]
+    - [6.5, 4.0]
+    - [1.5, 4.5]
+    - [8.5, 4.5]
+
+# ---------------------------------------------------------------------------
+# GCC-PHAT settings
+# ---------------------------------------------------------------------------
+gcc_phat:
+  # FFT size: use next power-of-2 >= 2 * signal_length for zero-padding.
+  # This avoids circular aliasing in cross-correlation.
+  # None = auto (computed at runtime as 2 * len(signal))
+  fft_size: null
+  # Maximum delay search range (fraction of sample rate period)
+  # Theoretical max delay = max_baseline / speed_of_sound
+  # For 8m baseline at 16kHz: 8/343 * 16000 = ~373 samples
+  max_tau_samples: null   # null = auto (computed from geometry)
+
+# ---------------------------------------------------------------------------
+# Localization solver
+# ---------------------------------------------------------------------------
+localization:
+  method: "nonlinear_least_squares"   # Hyperbolic TDOA multilateration
+  initial_guess: "centroid"           # Start NLS from microphone array centroid
+  max_iterations: 1000
+  tolerance: 1.0e-8
+
+# ---------------------------------------------------------------------------
+# Output paths
+# ---------------------------------------------------------------------------
+output:
+  results_dir: "results/experiment_01"
+  figures_dir: "results/experiment_01/figures"
+  data_dir: "data/simulated"
+  csv_filename: "multi_source_results.csv"
+
+# ---------------------------------------------------------------------------
+# Matplotlib figure settings
+# ---------------------------------------------------------------------------
+figures:
+  dpi: 150
+  format: "png"
+  style: "seaborn-v0_8-whitegrid"

@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EchoLocate — Real-Time Acoustic Source Localization & Research Platform</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top KPI Status Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo-mark">🔊</div>
+        <div>
+          <h1>ECHOLOCATE</h1>
+          <p class="subtitle">Research Visualization & Analytics Platform (Exp 6.25)</p>
+        </div>
+      </div>
+
+      <div class="header-kpis">
+        <div class="kpi-item">
+          <span class="kpi-label">METHOD</span>
+          <span id="kpi-method" class="kpi-val text-blue">M12 Hybrid</span>
+        </div>
+        <div class="kpi-item">
+          <span class="kpi-label">POSITION</span>
+          <span id="kpi-pos" class="kpi-val font-mono">X = -- m, Y = -- m</span>
+        </div>
+        <div class="kpi-item">
+          <span class="kpi-label">CONFIDENCE</span>
+          <span id="kpi-conf" class="kpi-val text-green">--%</span>
+        </div>
+        <div class="kpi-item">
+          <span class="kpi-label">LATENCY</span>
+          <span id="kpi-lat" class="kpi-val font-mono">-- ms</span>
+        </div>
+        <div class="kpi-item">
+          <span class="kpi-label">RTF</span>
+          <span id="kpi-rtf" class="kpi-val font-mono">--x</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <span id="provenance-badge" class="badge badge-green">🟢 LIVE COMPUTED</span>
+        <span id="causality-badge" class="badge badge-outline">⚡ STRICTLY CAUSAL</span>
+      </div>
+    </header>
+
+    <!-- Main 3-Column Layout -->
+    <div class="main-layout">
+      <!-- Left Navigation Sidebar -->
+      <nav class="sidebar">
+        <div class="nav-group-title">RESEARCH VIEWS</div>
+        <button class="nav-item active" data-view="overview">📊 1. Overview Dashboard</button>
+        <button class="nav-item" data-view="signals">🌊 2. Multichannel Signals</button>
+        <button class="nav-item" data-view="gcc_deepgcc">⚡ 3. GCC vs DeepGCC</button>
+        <button class="nav-item" data-view="srp_heatmap">🗺️ 4. SRP Spatial Likelihood</button>
+        <button class="nav-item" data-view="srp_explainer">🔍 5. SRP Explainer Stepper</button>
+        <button class="nav-item" data-view="method_comp">⚔️ 6. Method Comparison</button>
+        <button class="nav-item" data-view="uncertainty">🎯 7. Confidence & Ellipse</button>
+        <button class="nav-item" data-view="tracking">📈 8. Trajectory & Tracking</button>
+        <button class="nav-item" data-view="simulation">🧪 9. Simulation & Failure Lab</button>
+        <button class="nav-item" data-view="dataset_player">📼 10. Real Dataset Player</button>
+        <button class="nav-item" data-view="timeline">📜 11. Research Journey</button>
+        <button class="nav-item nav-examiner" data-view="examiner">🎓 12. Examiner Mode</button>
+        <button class="nav-item nav-hardware" data-view="hardware">🔴 13. Live Hardware (Exp 6.5)</button>
+      </nav>
+
+      <!-- Central Visual Surface -->
+      <main class="content-surface">
+        <!-- View 1: Overview Dashboard -->
+        <section id="view-overview" class="view-panel active">
+          <div class="panel-header">
+            <h2>System Overview & Live 2D Acoustic Floorplan</h2>
+            <div class="legend">
+              <span><i class="dot dot-blue"></i> Mics</span>
+              <span><i class="dot dot-red"></i> Estimated Source</span>
+              <span><i class="dot dot-green"></i> Ground Truth</span>
+            </div>
+          </div>
+          <div class="canvas-card">
+            <canvas id="overviewCanvas" width="760" height="420"></canvas>
+          </div>
+        </section>
+
+        <!-- View 2: Multichannel Signals -->
+        <section id="view-signals" class="view-panel">
+          <div class="panel-header">
+            <h2>Multichannel Waveforms & Arrival Delay Geometry</h2>
+            <button class="btn btn-secondary btn-sm" onclick="fetchWaveforms()">Refresh Signal</button>
+          </div>
+          <div class="signal-grid">
+            <div class="card">
+              <h3>Synchronized 4-Channel Waveforms</h3>
+              <canvas id="waveformCanvas" width="720" height="240"></canvas>
+            </div>
+            <div class="card">
+              <h3>STFT Magnitude Spectrogram (Channel 1)</h3>
+              <canvas id="spectrogramCanvas" width="720" height="160"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 3: GCC vs DeepGCC -->
+        <section id="view-gcc_deepgcc" class="view-panel">
+          <div class="panel-header">
+            <h2>Raw GCC-PHAT vs. Calibrated DeepGCC Neural Likelihood</h2>
+            <div class="select-wrapper">
+              <label>Select Pair: </label>
+              <select id="gcc-pair-select" class="form-select" onchange="renderGCCPair()">
+                <option value="0">Pair (1, 2)</option>
+                <option value="1">Pair (1, 3)</option>
+                <option value="2">Pair (1, 4)</option>
+                <option value="3">Pair (2, 3)</option>
+              </select>
+            </div>
+          </div>
+          <div class="card">
+            <canvas id="gccCanvas" width="740" height="340"></canvas>
+            <div class="metric-row mt-3">
+              <div class="metric-pill"><span>Raw PSR:</span> <strong id="val-raw-psr">1.82</strong></div>
+              <div class="metric-pill"><span>Harmonic Suppression:</span> <strong id="val-suppr" class="text-green">+78.4%</strong></div>
+              <div class="metric-pill"><span>Temperature T:</span> <strong id="val-temp">0.35</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 4: SRP Spatial Heatmap -->
+        <section id="view-srp_heatmap" class="view-panel">
+          <div class="panel-header">
+            <h2>2D Steered Response Power Spatial Likelihood Surface</h2>
+            <button class="btn btn-secondary btn-sm" onclick="fetchSpatialHeatmap()">Recompute Heatmap</button>
+          </div>
+          <div class="card canvas-card">
+            <canvas id="heatmapCanvas" width="760" height="400"></canvas>
+          </div>
+        </section>
+
+        <!-- View 5: SRP Explainer Stepper -->
+        <section id="view-srp_explainer" class="view-panel">
+          <div class="panel-header">
+            <h2>Educational SRP Constructive Interference Walkthrough</h2>
+            <div class="stepper-controls">
+              <button class="btn btn-outline btn-sm" onclick="prevExplainerStep()">◀ Prev Step</button>
+              <span id="explainer-step-indicator" class="font-mono">Step 4 / 8</span>
+              <button class="btn btn-primary btn-sm" onclick="nextExplainerStep()">Next Step ▶</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 id="explainer-title">Step 4: Sample Pairwise Correlation Curves</h3>
+            <p id="explainer-desc" class="text-muted mb-3">Sampling GCC-PHAT curves at expected propagation delays.</p>
+            <canvas id="explainerCanvas" width="740" height="280"></canvas>
+          </div>
+        </section>
+
+        <!-- View 6: Method Comparison -->
+        <section id="view-method_comp" class="view-panel">
+          <div class="panel-header">
+            <h2>Method Comparison Command Center (M1 vs M2 vs M6 vs M11e vs M12)</h2>
+            <button class="btn btn-primary btn-sm" onclick="runMethodComparison()">Run Head-to-Head</button>
+          </div>
+          <div class="card mb-3">
+            <table class="data-table" id="method-comp-table">
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Estimated (X, Y)</th>
+                  <th>Error</th>
+                  <th>Confidence</th>
+                  <th>Latency</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>Simultaneous Multi-Method Spatial Layout</h3>
+            <canvas id="compMapCanvas" width="740" height="240"></canvas>
+          </div>
+        </section>
+
+        <!-- View 7: Confidence & Uncertainty -->
+        <section id="view-uncertainty" class="view-panel">
+          <div class="panel-header">
+            <h2>Spatial Confidence & Uncertainty Ellipse Analysis</h2>
+          </div>
+          <div class="grid-2col">
+            <div class="card">
+              <h3>Real-Time Spatial Confidence Gauge</h3>
+              <div class="gauge-wrapper">
+                <div class="gauge-val font-mono" id="gauge-conf-pct">88%</div>
+                <div class="gauge-sub" id="gauge-conf-state">HIGH CONFIDENCE</div>
+              </div>
+              <canvas id="ellipseCanvas" width="340" height="220"></canvas>
+            </div>
+            <div class="card">
+              <h3>Selective Prediction Risk-Coverage Trade-Off</h3>
+              <canvas id="riskCoverageCanvas" width="340" height="220"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 8: Trajectory & Tracking -->
+        <section id="view-tracking" class="view-panel">
+          <div class="panel-header">
+            <h2>Causal Trajectory Tracking & Temporal Jitter Reduction</h2>
+          </div>
+          <div class="card">
+            <canvas id="trackingCanvas" width="740" height="340"></canvas>
+            <div class="metric-row mt-3">
+              <div class="metric-pill"><span>Raw Jitter:</span> <strong class="text-red">0.25 m</strong></div>
+              <div class="metric-pill"><span>Causal Smoothed:</span> <strong class="text-blue">0.08 m</strong></div>
+              <div class="metric-pill"><span>Jitter Reduction:</span> <strong class="text-green">+68.0%</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 9: Simulation & Failure Lab -->
+        <section id="view-simulation" class="view-panel">
+          <div class="panel-header">
+            <h2>Interactive Acoustic Simulation & Failure Diagnostics Lab</h2>
+            <button class="btn btn-primary btn-sm" onclick="runSimLab()">Run Simulation</button>
+          </div>
+          <div class="grid-2col">
+            <div class="card">
+              <div class="slider-group">
+                <label>Reverberation RT60: <span id="lbl-sim-rt60">0.38 s</span></label>
+                <input type="range" id="sim-rt60" min="0.10" max="0.90" step="0.05" value="0.38" oninput="document.getElementById('lbl-sim-rt60').textContent = this.value + ' s'">
+              </div>
+              <div class="slider-group">
+                <label>SNR Level: <span id="lbl-sim-snr">18 dB</span></label>
+                <input type="range" id="sim-snr" min="-5" max="30" step="5" value="18" oninput="document.getElementById('lbl-sim-snr').textContent = this.value + ' dB'">
+              </div>
+              <div class="slider-group">
+                <label>Microphone Perturbation: <span id="lbl-sim-pert">0 mm</span></label>
+                <input type="range" id="sim-pert" min="0" max="25" step="2" value="0" oninput="document.getElementById('lbl-sim-pert').textContent = this.value + ' mm'">
+              </div>
+            </div>
+            <div class="card">
+              <h3>Diagnostic Report</h3>
+              <div id="sim-diag-box" class="diag-box">
+                <div class="diag-title">Acoustic State: Nominal</div>
+                <div id="sim-diag-text" class="diag-body">Awaiting simulation execution.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 10: Real Dataset Player -->
+        <section id="view-dataset_player" class="view-panel">
+          <div class="panel-header">
+            <h2>LOCATA Real Multichannel Dataset Sequential Player</h2>
+            <div class="player-controls">
+              <button class="btn btn-primary btn-sm" onclick="toggleDatasetPlay()">Play / Pause</button>
+              <button class="btn btn-outline btn-sm" onclick="restartDatasetPlay()">Restart</button>
+            </div>
+          </div>
+          <div class="card">
+            <canvas id="datasetPlayerCanvas" width="740" height="340"></canvas>
+          </div>
+        </section>
+
+        <!-- View 11: Research Journey -->
+        <section id="view-timeline" class="view-panel">
+          <div class="panel-header">
+            <h2>EchoLocate Research Journey (Experiments 1 → 6.25)</h2>
+          </div>
+          <div class="timeline-container" id="timeline-list"></div>
+        </section>
+
+        <!-- View 12: Examiner Mode -->
+        <section id="view-examiner" class="view-panel">
+          <div class="panel-header">
+            <h2>🎓 Examiner Demonstration & Integrity Verification Mode</h2>
+            <button class="btn btn-audit" onclick="examinerRerun()">⚡ Re-run Current Frame</button>
+          </div>
+          <div class="examiner-grid">
+            <div class="card">
+              <h3>1-Click Guided Presentation Presets</h3>
+              <div class="btn-grid mt-2">
+                <button class="btn btn-preset" onclick="loadExaminerPreset('demo_1_stable')">1. Stable Anechoic Baseline (Exp 1)</button>
+                <button class="btn btn-preset" onclick="loadExaminerPreset('demo_2_classical_failure_srp_recovery')">2. Classical Failure & SRP Recovery (Exp 2/3)</button>
+                <button class="btn btn-preset" onclick="loadExaminerPreset('demo_3_speech_harmonic_ambiguity')">3. Speech Harmonic Pseudo-Peaks (Exp 4)</button>
+                <button class="btn btn-preset" onclick="loadExaminerPreset('demo_4_physical_mismatch')">4. Physical Array Mismatch (Exp 4.75)</button>
+                <button class="btn btn-preset" onclick="loadExaminerPreset('demo_5_real_playback')">5. Real LOCATA Sequential Playback (Exp 5)</button>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Mathematical & Integrity Audit</h3>
+              <div class="audit-row"><span>Ground Truth Used During Inference:</span> <strong class="text-green">ZERO (BLIND)</strong></div>
+              <div class="audit-row"><span>Future-Frame Lookahead:</span> <strong class="text-green">STRICTLY FORWARD</strong></div>
+              <div class="audit-row"><span>Permutation Invariance:</span> <strong class="text-green">100% VERIFIED</strong></div>
+              <div class="audit-row"><span>Live Latency Recomputation:</span> <strong id="exam-live-lat" class="font-mono">-- ms</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- View 13: Live Hardware Acquisition & Dual-Device Demo (Exp 6.5) -->
+        <section id="view-hardware" class="view-panel">
+          <div class="panel-header">
+            <h2>🔴 Real Hardware Acquisition, Dual-Device TDOA & Motion Demonstration</h2>
+            <div class="header-right">
+              <span id="hw-mode-badge" class="badge badge-orange">📱 MODE H2: DUAL-DEVICE EXPERIMENT</span>
+              <button class="btn btn-audit btn-sm" onclick="triggerReprocess()">⚡ CAPTURE & REPROCESS</button>
+            </div>
+          </div>
+
+          <div class="card mb-3" style="background:#0b1120; border-color:#f97316;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <strong class="text-orange">⚠️ SCIENTIFIC TRANSPARENCY NOTICE:</strong>
+                <span class="text-muted" style="font-size:11px; margin-left:6px;">Operating in Experimental Unsynchronized Multi-Device Mode. Two microphones define a 2D hyperbolic locus (not a point intersection).</span>
+              </div>
+              <div style="font-size:11px;">
+                <span>Frame Hash: <strong id="hw-hash-val" class="font-mono text-blue">H2-INIT</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-2col mb-3">
+            <!-- Left Card: Live Signals & Metrics -->
+            <div class="card">
+              <h3>Live Device Signals &amp; Diagnostics</h3>
+              
+              <!-- Two Side-by-Side Acoustic Level Windows (Laptop vs Phone) -->
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px; margin-bottom:8px;">
+                <!-- Laptop Mic Box -->
+                <div style="background:#0b1120; border:1px solid #1e293b; border-radius:8px; padding:10px; text-align:center;">
+                  <div style="font-size:11px; font-weight:700; color:#38bdf8; display:flex; align-items:center; justify-content:center; gap:4px;">
+                    💻 LAPTOP MIC
+                  </div>
+                  <div id="hw-lap-rms" style="font-size:20px; font-weight:800; font-family:monospace; color:#38bdf8; margin:4px 0;">-45.0 dB</div>
+                  <div style="font-size:10px; color:#9ca3af;" id="hw-lap-freq">0 Hz dominant</div>
+                  <div style="background:#1f2937; border-radius:4px; height:6px; overflow:hidden; margin-top:6px;">
+                    <div id="hw-vu-lap" style="height:100%; width:0%; background:linear-gradient(90deg,#38bdf8,#6366f1); transition:width 0.1s ease;"></div>
+                  </div>
+                </div>
+
+                <!-- Phone Mic Box -->
+                <div style="background:#0b1120; border:1px solid #1e293b; border-radius:8px; padding:10px; text-align:center;">
+                  <div style="font-size:11px; font-weight:700; color:#22c55e; display:flex; align-items:center; justify-content:center; gap:4px;">
+                    📱 PHONE MIC
+                  </div>
+                  <div id="hw-ph-rms" style="font-size:20px; font-weight:800; font-family:monospace; color:#22c55e; margin:4px 0;">— dB</div>
+                  <div style="font-size:10px; color:#9ca3af;" id="hw-phone-status">WAITING FOR STREAM</div>
+                  <div style="background:#1f2937; border-radius:4px; height:6px; overflow:hidden; margin-top:6px;">
+                    <div id="hw-vu-phone" style="height:100%; width:0%; background:linear-gradient(90deg,#22c55e,#84cc16); transition:width 0.1s ease;"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Interaural Level Difference (ILD) Energy Balance Indicator -->
+              <div style="background:#090e17; border:1px solid #1f2937; border-radius:6px; padding:6px 10px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; font-size:11px;">
+                <span style="color:#9ca3af;">Acoustic Energy Balance (ILD):</span>
+                <strong id="hw-ild-val" style="color:#f59e0b; font-family:monospace;">ΔL = 0.0 dB (Center)</strong>
+              </div>
+
+              <canvas id="hwGccCanvas" width="340" height="150"></canvas>
+              <div style="font-size:10px; color:#9ca3af; text-align:center; margin-top:4px;">Live GCC-PHAT Cross-Correlation R_12(τ) — <span id="hw-psr-val" style="color:#22c55e;">PSR —</span></div>
+            </div>
+
+            <!-- Right Card: Hyperbolic Locus Room Map -->
+            <div class="card">
+              <h3>2D Spatial Hyperbolic Locus Map</h3>
+              <canvas id="hwHyperbolaCanvas" width="340" height="180"></canvas>
+              <div class="metric-row mt-2">
+                <div class="metric-pill"><span>TDOA:</span> <strong id="hw-tdoa-val" class="text-blue">0.000 ms</strong></div>
+                <div class="metric-pill"><span>Δd:</span> <strong id="hw-dist-diff">0.0 cm</strong></div>
+                <div class="metric-pill"><span>Conf:</span> <strong id="hw-conf-pct" class="text-green">—</strong></div>
+                <div class="metric-pill"><span>AoA:</span> <strong id="hw-aoa-val" style="color:#a78bfa;">—</strong></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid-2col">
+            <!-- Left: Motion Timeline -->
+            <div class="card">
+              <h3>Live "Move The Sound" TDOA Timeline</h3>
+              <div id="hw-dir-label" style="font-size:11px; font-weight:700; color:#38bdf8; margin-bottom:6px;">Source Centered Between Devices</div>
+              <canvas id="hwTimelineCanvas" width="340" height="100"></canvas>
+            </div>
+
+            <!-- Right: Clock Sync & Calibration -->
+            <div class="card">
+              <h3>Clock Synchronization & Calibration</h3>
+              <div class="audit-row"><span>Drift Rate:</span> <strong id="hw-drift-val" class="font-mono">0.0 ppm</strong></div>
+              <div class="audit-row"><span>Network Jitter:</span> <strong id="hw-jitter-val" class="font-mono">1.20 ms</strong></div>
+              <div class="audit-row"><span>Round-Trip Latency:</span> <strong id="hw-rtt-val" class="font-mono">24.5 ms</strong></div>
+              <div class="audit-row"><span>Gain Offset:</span> <strong id="hw-gain-calib-val" class="font-mono text-blue">0.0 dB</strong></div>
+              <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                <button class="btn btn-warning btn-sm" style="flex:1; background:#d97706; color:#fff; font-weight:700;" onclick="triggerGainCalib()">⚖️ Auto-Zero Sensitivity (Center)</button>
+                <button class="btn btn-secondary btn-sm" onclick="triggerAcousticCalib()">🎯 Time Calib</button>
+                <a href="/phone" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none; display:inline-flex; align-items:center;">📱 Connect Phone</a>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Right Inspector Panel -->
+      <aside class="inspector-panel">
+        <div class="panel-section">
+          <h2>Active Algorithm</h2>
+          <select id="active-method-select" class="form-select" onchange="changeGlobalMethod(this.value)">
+            <option value="M12_Confidence_Hybrid" selected>M12: Gated Hybrid (Best Overall)</option>
+            <option value="M2_Raw_SRP">M2: Raw SRP-PHAT</option>
+            <option value="M6_Calibrated_DeepGCC">M6: Calibrated DeepGCC</option>
+            <option value="M11e_Hybrid_Spatial_SRP">M11e: Diff Spatial SRP</option>
+            <option value="M1_Classical_NLS">M1: Classical NLS</option>
+          </select>
+        </div>
+
+        <div class="panel-section">
+          <h2>Pipeline Profiler</h2>
+          <div id="inspector-latencies" class="latency-list">
+            <div class="lat-row"><span>Input Check:</span> <strong class="font-mono">0.4 ms</strong></div>
+            <div class="lat-row"><span>GCC-PHAT:</span> <strong class="font-mono">2.4 ms</strong></div>
+            <div class="lat-row"><span>Neural Likelihood:</span> <strong class="font-mono">2.1 ms</strong></div>
+            <div class="lat-row"><span>SRP Steering:</span> <strong class="font-mono">5.8 ms</strong></div>
+            <div class="lat-row"><span>Causal Tracking:</span> <strong class="font-mono">0.7 ms</strong></div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <h2>Examiner Tools</h2>
+          <button class="btn btn-outline w-full mb-2" onclick="clearVisualMap()">Clear Trajectory</button>
+          <button class="btn btn-secondary w-full" onclick="toggleFullScreen()">Full Screen</button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Bottom Synchronized Pipeline Bar -->
+    <footer class="pipeline-bar">
+      <div class="pipeline-stage active" id="stg-audio">1. AUDIO INGESTION</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage active" id="stg-val">2. SIGNAL VALIDATE</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage active" id="stg-gcc">3. GCC CORRELATION</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage active" id="stg-neural">4. NEURAL LIKELIHOOD</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage active" id="stg-srp">5. SRP SPATIAL SEARCH</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage active" id="stg-conf">6. CONFIDENCE GAUGE</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-stage active" id="stg-track">7. CAUSAL TRACKING</div>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script src="/static/hardware.js"></script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+# EchoLocate — Experiment 2.5 Configuration
+# Transition-Zone Verification and Reverberation Threshold Refinement
+
+experiment:
+  name: "experiment_02_5"
+  title: "Transition-Zone Verification and Reverberation Threshold Refinement"
+  description: "Fine-grained sweep across nominal RT60 0.200s to 0.350s at 40 dB SNR to characterize baseline failure threshold using measured RT60"
+  base_seed: 42
+
+room:
+  dimensions: [10.0, 6.0, 3.0]
+  sampling_rate: 16000
+  speed_of_sound: 343.0
+  air_absorption: false
+  ray_tracing: false
+
+source:
+  positions_file: "configs/experiment_02_source_positions.csv"
+  signal_type: "chirp"
+  signal_parameters:
+    f_start: 300.0
+    f_end: 7000.0
+    duration: 0.1
+    amplitude: 1.0
+
+microphones:
+  geometry: "baseline_a"
+  name: "Baseline Triangle (Geometry A)"
+  height: 1.2
+  positions:
+    M1: [1.0, 1.5]
+    M2: [9.0, 1.5]
+    M3: [5.0, 4.5]
+
+environment:
+  target_rt60_values:
+    - 0.200
+    - 0.225
+    - 0.250
+    - 0.275
+    - 0.300
+    - 0.325
+    - 0.350
+  primary_snr_db: 40.0
+  secondary_snr_db: 60.0  # Optional validation
+
+trials:
+  num_trials: 5
+
+evaluation:
+  success_thresholds:
+    - 0.25
+    - 0.50
+    - 1.00
+    - 2.00
+  catastrophic_failure_threshold: 2.0

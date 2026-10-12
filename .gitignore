@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Model Checkpoints & Large Binaries (>150MB)
+demo_data/models/
+*.onnx
+*.ckpt
+*.pt
+*.pth
+
+# Private Biometric Audio, Embeddings & Profiles
+demo_data/speakers/
+
+# Data files (large / raw / simulated)
+data/
+
+# Generated Results & Diagnostic Artifacts
+results/
+
+# Certificates, Keys & Secrets
+certs/
+*.pem
+*.key
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Logs & Caches
+*.log
+.pytest_cache/
+

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>EchoLocate Mobile Microphone Client</title>
+  <style>
+    :root {
+      --bg: #090e17;
+      --card-bg: #111827;
+      --border: #1f2937;
+      --primary: #38bdf8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #f9fafb;
+      --muted: #9ca3af;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .header { text-align: center; margin-bottom: 20px; }
+    .header h1 { font-size: 20px; color: var(--primary); font-weight: 800; }
+    .header p { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--red);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .status-badge.connected {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+      border-color: rgba(34, 197, 94, 0.3);
+    }
+    
+    .vu-container {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .vu-label { font-size: 11px; color: var(--muted); font-weight: 600; display: flex; justify-content: space-between; }
+    .vu-bar {
+      height: 18px;
+      background: #1f2937;
+      border-radius: 9px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .vu-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--primary), var(--green));
+      transition: width 0.04s ease-out;
+    }
+    
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      background: #0b1120;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .stat-item { display: flex; flex-direction: column; }
+    .stat-lbl { font-size: 10px; color: var(--muted); }
+    .stat-val { font-size: 14px; font-weight: 700; font-family: monospace; }
+    
+    .btn {
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      width: 100%;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .btn-start { background: var(--green); color: #090e17; }
+    .btn-stop { background: var(--red); color: #ffffff; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📱 EchoLocate Phone Mic</h1>
+    <p>Real-Time Network Microphone Client (Exp 6.5)</p>
+  </div>
+
+  <div class="card">
+    <div style="text-align: center;">
+      <div id="status-badge" class="status-badge">● DISCONNECTED</div>
+    </div>
+
+    <div class="vu-container">
+      <div class="vu-label">
+        <span>AUDIO LEVEL</span>
+        <span id="rms-val">-inf dB</span>
+      </div>
+      <div class="vu-bar">
+        <div id="vu-fill" class="vu-fill"></div>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-item">
+        <span class="stat-lbl">NETWORK RTT</span>
+        <span id="stat-rtt" class="stat-val">-- ms</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-lbl">CLOCK OFFSET</span>
+        <span id="stat-offset" class="stat-val">-- ms</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-lbl">FRAMES SENT</span>
+        <span id="stat-frames" class="stat-val">0</span>
+      </      <div class="stat-item">
+        <span class="stat-lbl">SAMPLE RATE</span>
+        <span id="stat-sr" class="stat-val">16000 Hz</span>
+      </div>
+    </div>
+
+    <button id="btn-toggle" class="btn btn-start" onclick="toggleAudioStreaming()">🎙️ START LIVE STREAMING</button>
+  </div>
+
+  <script>
+    let isStreaming = false;
+    let ws = null;
+    let audioCtx = null;
+    let micStream = null;
+    let scriptProcessor = null;
+    let sequenceId = 0;
+    let ntpInterval = null;
+
+    function toggleAudioStreaming() {
+      if (!isStreaming) {
+        startStreaming();
+      } else {
+        stopStreaming();
+      }
+    }
+
+    async function startStreaming() {
+      try {
+        // Request microphone stream
+        const constraints = {
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          }
+        };
+
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (e) {
+          // Fallback to generic audio if constraint fails on some mobile devices
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        }
+        micStream = stream;
+
+        // Initialize AudioContext
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContextClass();
+        if (audioCtx.state === "suspended") {
+          await audioCtx.resume();
+        }
+
+        const source = audioCtx.createMediaStreamSource(stream);
+        document.getElementById("stat-sr").textContent = `${audioCtx.sampleRate} Hz`;
+
+        // Connect WebSocket
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${proto}//${location.host}/ws/phone_audio`;
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = "arraybuffer";
+
+        ws.onopen = () => {
+          document.getElementById("status-badge").className = "status-badge connected";
+          document.getElementById("status-badge").textContent = "🟢 CONNECTED & STREAMING";
+          startNTPProbeLoop();
+        };
+
+        ws.onmessage = (evt) => {
+          try {
+            if (typeof evt.data === "string") {
+              const data = JSON.parse(evt.data);
+              if (data.type === "ntp_reply") {
+                const t3 = performance.now();
+                const rtt = t3 - data.t0;
+                document.getElementById("stat-rtt").textContent = `${Math.round(rtt)} ms`;
+                ws.send(JSON.stringify({
+                  type: "ntp_finish",
+                  t0: data.t0,
+                  t1: data.t1,
+                  t2: data.t2,
+                  t3: t3,
+                }));
+              }
+            }
+          } catch (e) {}
+        };
+
+        ws.onclose = () => {
+          document.getElementById("status-badge").className = "status-badge";
+          document.getElementById("status-badge").textContent = "● DISCONNECTED";
+        };
+
+        // Buffer size: 2048 samples
+        const bufferSize = 2048;
+        scriptProcessor = audioCtx.createScriptProcessor(bufferSize, 1, 1);
+
+        scriptProcessor.onaudioprocess = (e) => {
+          if (!isStreaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+          const inputData = e.inputBuffer.getChannelData(0);
+          
+          // Calculate RMS for VU meter
+          let sumSq = 0;
+          for (let i = 0; i < inputData.length; i++) {
+            sumSq += inputData[i] * inputData[i];
+          }
+          const rms = Math.sqrt(sumSq / inputData.length);
+          const rmsDb = 20 * Math.log10(Math.max(1e-5, rms));
+          const pct = Math.min(100, Math.max(0, (rmsDb + 60) * 1.8));
+          document.getElementById("vu-fill").style.width = `${pct}%`;
+          document.getElementById("rms-val").textContent = `${rmsDb.toFixed(1)} dB`;
+
+          sequenceId++;
+
+          // Send raw binary Float32 packet: [16-byte header: seq(u32), client_ts(f64), sr(u32)] + Float32Array
+          const headerBuffer = new ArrayBuffer(16);
+          const headerView = new DataView(headerBuffer);
+          headerView.setUint32(0, sequenceId, true);
+          headerView.setFloat64(4, performance.now(), true);
+          headerView.setUint32(12, audioCtx.sampleRate, true);
+
+          // Combined payload
+          const pcmBytes = new Uint8Array(inputData.buffer, inputData.byteOffset, inputData.byteLength);
+          const payload = new Uint8Array(16 + pcmBytes.length);
+          payload.set(new Uint8Array(headerBuffer), 0);
+          payload.set(pcmBytes, 16);
+
+          ws.send(payload.buffer);
+          document.getElementById("stat-frames").textContent = sequenceId;
+        };
+
+        // Muted gain node to prevent speaker feedback while keeping audio engine alive
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0;
+        source.connect(scriptProcessor);
+        scriptProcessor.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        isStreaming = true;
+        document.getElementById("btn-toggle").className = "btn btn-stop";
+        document.getElementById("btn-toggle").textContent = "⏹️ STOP STREAMING";
+
+      } catch (err) {
+        alert("Microphone permission denied or device error: " + err.message);
+      }
+    }
+
+    function stopStreaming() {
+      isStreaming = false;
+      if (ntpInterval) clearInterval(ntpInterval);
+      if (scriptProcessor) scriptProcessor.disconnect();
+      if (audioCtx) audioCtx.close();
+      if (micStream) micStream.getTracks().forEach(t => t.stop());
+      if (ws) ws.close();
+
+      document.getElementById("status-badge").className = "status-badge";
+      document.getElementById("status-badge").textContent = "● DISCONNECTED";
+      document.getElementById("btn-toggle").className = "btn btn-start";
+      document.getElementById("btn-toggle").textContent = "🎙️ START LIVE STREAMING";
+    }
+
+    function startNTPProbeLoop() {
+      if (ntpInterval) clearInterval(ntpInterval);
+      ntpInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: "ntp_probe",
+            t0: performance.now(),
+          }));
+        }
+      }, 2000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+"""EchoLocate — Localization sub-package."""

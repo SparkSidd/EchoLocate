@@ -1,0 +1,1 @@
+"""EchoLocate — Simulation sub-package."""
