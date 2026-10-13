@@ -133,7 +133,25 @@ class SpeakerIdentifier:
             return res
 
         # 3. Model-Agnostic Speaker Embedding Extraction
-        embedding = self.encoder.embed(seg.samples, sample_rate=seg.sample_rate)
+        try:
+            embedding = self.encoder.embed(seg.samples, sample_rate=seg.sample_rate)
+        except (ValueError, FloatingPointError) as e:
+            logger.warning("Speaker embedding extraction failed: %s", e)
+            res = SpeakerAttributionResult(
+                speaker_id="UNKNOWN",
+                status=AttributionStatus.INSUFFICIENT_AUDIO,
+                confidence=0.0,
+                similarity=-1.0,
+                threshold=self.matcher.default_threshold,
+                embedding_model=self.encoder.model_name(),
+                segment_start=start_sec,
+                segment_end=segment_end,
+                speech_ratio=speech_ratio,
+                metadata={"reason": f"embedding_extraction_failed: {e}"},
+            )
+            if self.temporal_tracker is not None:
+                return self.temporal_tracker.update(res)
+            return res
 
         # 4. Cosine Similarity Matching & UNKNOWN Gating
         enrolled_ids, centroids = self.enrollment_db.get_all_centroids()

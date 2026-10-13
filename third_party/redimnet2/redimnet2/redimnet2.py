@@ -1,0 +1,351 @@
+import math
+import torch
+import functools
+import numpy as np
+import torch.nn as nn
+
+import redimnet2.layers.features as features
+import redimnet2.layers.features_tf as features_tf
+import redimnet2.layers.poolings as pooling_layers
+from redimnet2.layers.layernorm import LayerNorm
+from redimnet2.layers.blocks import ConvBlock2d, TimeContextBlock1d
+from redimnet2.layers.redim_structural import to1d, to2d, to1d_tfopt, to2d_tfopt, weigth1d
+
+# class ShapeLogger(nn.Module):
+#     def __init__(self, module):
+#         super().__init__()
+#         self.module = module
+
+#     def forward(self,x):
+#         cls_name = self.module.__class__.__name__
+#         in_shape = tuple(x.size())
+#         h = self.module(x)
+#         out_shape = tuple(h.size())
+#         print(f"{cls_name} : {in_shape} -> {out_shape}")
+#         return h
+
+ShapeLogger = lambda x : x
+
+#------------------------------------------
+
+class FreqEncoder(nn.Module):
+    def __init__(self,c,bins):
+        super().__init__()
+        self.freq_embedder = nn.Embedding(
+            num_embeddings=bins, 
+            embedding_dim=c)
+
+    def forward(self,x):
+        b, c, f, t = x.size()
+        freqs = torch.range(start=0,end=f-1, step=1, dtype=torch.long)
+        freqs = freqs.unsqueeze(0).repeat(b,1).to(x.device) # [bs,f]
+        fe = self.freq_embedder(freqs).permute(0,2,1).unsqueeze(-1) # [bs, freq_emb_dim, f, 1]
+        fe = fe.repeat(1,1,1,t)
+        x = x + fe
+        return x
+
+import collections
+from itertools import repeat
+from typing import Any
+# https://github.com/pytorch/pytorch/blob/dc8692b0eb093d5af150ae0f3a29a0957c3e4c0d/torch/nn/modules/utils.py#L10
+def _ntuple(n, name="parse"):
+    def parse(x):
+        if isinstance(x, collections.abc.Iterable):
+            return tuple(x)
+        return tuple(repeat(x, n))
+
+    parse.__name__ = name
+    return parse
+    
+_pair = _ntuple(2, "_pair")
+        
+#------------------------------------------
+#                 UReDimNet
+#------------------------------------------
+class ReDimNet2(nn.Module):
+    # UNet-like ReDimNet
+    def __init__(self,
+        F = 72,
+        C = 24,
+        spec_in_channels = 1, # Phase + Magnitude
+        causal = 'none',
+        out_channels = None,
+        block_1d_type = 'tf-att',
+        block_2d_type = "basic_resnet", 
+        return_2d_output = False,
+        fm_weigthing_type = 'NC',
+        use_freq_pos_enc = False,
+        compress_tconvs = True,
+        stages_setup = [
+            # Encoder part:
+            ((1,1),2,4,[(3,3)],None), # 16
+            ((2,1),3,3,[(3,3)],None), # 32 
+            
+            ((1,2),4,2,[(3,3)],None), # 64,
+            ((2,1),5,1,[(3,3)],48), # 128
+            
+            ((1,2),4,1,[(3,3)],64), # 128
+            ((2,1),3,1,[(3,3)],96), # 128
+        ],
+        group_divisor = 1
+    ):
+        super().__init__()
+        self.F = F
+        self.C = C
+        
+        if causal == 'full':
+            block_1d_type = block_1d_type + '-causal'
+            block_2d_type = block_2d_type + '-causal'
+            self.causal = True
+        elif causal == 'only_1d':
+            block_1d_type = block_1d_type + '-causal'
+            self.causal = True
+        elif causal == 'none':
+            self.causal = False
+        else:
+            raise NotImplementedError()
+        
+        self.block_1d_type = block_1d_type
+        self.block_2d_type = block_2d_type
+
+        self.stages_setup = stages_setup
+        self.fm_weigthing_type = fm_weigthing_type
+        
+        # Subnet stuff
+        self.build(F,C,spec_in_channels,out_channels,stages_setup,group_divisor,
+                   compress_tconvs,return_2d_output,use_freq_pos_enc)
+        
+    def build(self,F,C,spec_in_channels,out_channels,stages_setup,group_divisor,
+              compress_tconvs,return_2d_output,use_freq_pos_enc):
+        self.F = F
+        self.C = C
+        
+        c = C
+        f = F
+        
+        stt = 1
+        sft = 1
+
+        max_stt = stt
+        
+        self.num_stages = len(stages_setup)
+
+        self.stem = nn.Sequential(
+            nn.Conv2d(spec_in_channels, int(c), kernel_size=3, stride=1, padding='same'),
+            LayerNorm(int(c), eps=1e-6, data_format="channels_first"),
+            to1d()
+        )
+
+        append_to1d_before_tcm = True
+        Block1d = functools.partial(TimeContextBlock1d,block_type=self.block_1d_type)
+        Block2d = functools.partial(ConvBlock2d,block_type=self.block_2d_type)
+
+        if self.fm_weigthing_type == 'NC':
+            agg1d = functools.partial(weigth1d,C=F*C) 
+        elif self.fm_weigthing_type == 'N':
+            agg1d = functools.partial(weigth1d,C=None) 
+        else:
+            raise NotImplementedError()
+        
+        for stage_ind, (stride, num_blocks, conv_exp, kernel_sizes, att_block_red) in enumerate(stages_setup):
+            (sf, st) = stride
+            tot_stride = np.prod((sf, st))
+            num_feats_to_weight = stage_ind+1
+            # if tot_stride > 1:
+            layers = []
+            sft = sft * sf
+            stt = stt * st
+            layers.append(agg1d(N=num_feats_to_weight, requires_grad=num_feats_to_weight>1))
+            layers.append(to2d(f=f, c=c))
+            if use_freq_pos_enc:
+                layers.append(FreqEncoder(c=c,bins=f))
+                
+            layers.append(ShapeLogger(nn.Conv2d(int(c), int(sf*c*conv_exp), 
+                            kernel_size=(sf,stt), 
+                            stride=(sf,stt),
+                            padding=0, groups=1 if not compress_tconvs else 
+                                        math.gcd(int(c),int(sf*c*conv_exp)))))
+                
+            c = sf * c
+            assert f % sf == 0
+            f = f // sf
+                
+            if stt >= max_stt:
+                max_stt = stt
+        
+            for block_ind in range(num_blocks):
+                layers.append(Block2d(c=int(c*conv_exp), f=f, 
+                                      kernel_sizes=kernel_sizes, Gdiv=group_divisor))
+            
+            if conv_exp != 1:
+                _group_divisor = group_divisor
+                layers.append(nn.Sequential(
+                    nn.Conv2d(int(c*conv_exp), c, kernel_size=1, stride=1, padding='same'),
+                    nn.BatchNorm2d(c, eps=1e-6)
+                ))
+
+            if append_to1d_before_tcm:
+                layers.append(to1d())
+            if att_block_red is not None:
+                if append_to1d_before_tcm:
+                    layers.append(Block1d(C*F,hC=(C*F)//att_block_red))
+                else:
+                    layers.append(Block1d(C=c,F=f,hC=att_block_red))
+            if not append_to1d_before_tcm:
+                layers.append(to1d())
+            layers.append(ShapeLogger(nn.Upsample(scale_factor=stt, mode='nearest')))
+            setattr(self,f'stage{stage_ind}',nn.Sequential(*layers))
+
+        num_feats_to_weight_fin = len(stages_setup)+1
+        self.fin_wght1d = agg1d(N=num_feats_to_weight_fin, requires_grad=num_feats_to_weight_fin>1)
+
+        self.time_stride = max_stt
+        self.freq_stride = sft
+        self.head = nn.Identity()
+        print(f"out_channels : {out_channels}")
+        if return_2d_output:
+            self.fin_to2d = to2d(f=f,c=c)
+            if out_channels is not None:
+                self.head = nn.Conv2d(c, out_channels, 1)
+        else:
+            self.fin_to2d = nn.Identity()
+            if out_channels is not None:
+                self.head = nn.Conv1d(C*F, out_channels, 1)
+        
+    def run_stage(self,prev_outs_1d, stage_ind):
+        stage = getattr(self,f'stage{stage_ind}')
+        x = stage(prev_outs_1d)
+        return x
+        
+    def forward(self,inp):
+        bs, _, _, T = inp.size()
+        inp = inp[:,:,:,:(T//self.time_stride)*self.time_stride] # Needed for right reshape operations
+        # print(f"T = {T} -> T = {(T//self.time_stride)*self.time_stride}")
+        x = self.stem(inp)
+        outputs_1d = [x]
+        for stage_ind in range(self.num_stages):
+            outputs_1d.append(self.run_stage(outputs_1d,stage_ind))
+        x = self.fin_wght1d(outputs_1d)
+        outputs_1d.append(x)
+        x = self.fin_to2d(x)
+        x = self.head(x)
+        return x
+
+class ReDimNet2Wrap(nn.Module):
+    def __init__(self,
+        F = 72,
+        C = 24,
+        causal = False,
+        spec_in_channels = 1, # Phase + Magnitude
+        out_channels = None,
+        # block_1d_type = 'tf-att',
+        block_1d_type = 'conv+att',
+        block_2d_type = "basic_resnet", 
+        compress_tconvs = True,
+        return_2d_output = False,
+        use_freq_pos_enc = False,
+        fm_weigthing_type = 'NC',
+        stages_setup = [
+            # Encoder part:
+            ((1,1),2,4,[(3,3)],24), # 16
+            ((2,1),3,3,[(3,3)],24), # 32 
+            
+            ((1,2),4,2,[(3,3)],24), # 64,
+            ((2,1),5,1,[(3,3)],24), # 128
+            
+            ((1,2),4,1,[(3,3)],24), # 128
+            ((2,1),3,1,[(3,3)],24), # 128
+        ],
+        group_divisor = 1,
+        #-------------------------
+        embed_dim=192,
+        num_classes=None,
+        feat_agg_dropout=0.0,
+        head_activation=None,
+        hop_length=160,
+        pooling_func='ASTP',
+        pad_right_samples=None,
+        before_pool_offset=None,
+        feat_type='pt',
+        global_context_att=True,
+        emb_bn=False,
+        #-------------------------
+        spec_params = dict(
+            do_spec_aug=False,
+            freq_mask_width = (0, 6), 
+            time_mask_width = (0, 8),
+        ),
+    ):
+        super().__init__()
+        
+        self.backbone = ReDimNet2(
+            F = F, C = C,
+            causal = causal,
+            spec_in_channels = spec_in_channels, # Phase + Magnitude
+            out_channels = out_channels,
+            return_2d_output = return_2d_output,
+            block_1d_type = block_1d_type,
+            block_2d_type = block_2d_type, 
+            compress_tconvs = compress_tconvs,
+            fm_weigthing_type = fm_weigthing_type,
+            use_freq_pos_enc = use_freq_pos_enc,
+            stages_setup = stages_setup,
+            group_divisor = group_divisor
+        )
+        if feat_type in ['pt','pt_mel']:
+            self.spec = features.MelBanks(n_mels=F,hop_length=hop_length,**spec_params)
+        elif feat_type in ['tf','tf_mel']:
+            self.spec = features_tf.TFMelBanks(n_mels=F,hop_length=hop_length,**spec_params)
+        elif feat_type == 'tf_spec':
+            self.spec = features_tf.TFSpectrogram(**spec_params)
+        elif feat_type == 'pt_stft':
+            self.spec = features.STFT(**spec_params)
+        
+        if out_channels is None:
+            out_channels = C*F
+        else:
+            if return_2d_output:
+                out_channels = (F//self.backbone.freq_stride) * out_channels
+            else:
+                out_channels = out_channels
+
+        self.pool = getattr(pooling_layers, pooling_func)(
+            in_dim=out_channels, global_context_att=global_context_att)
+
+        self.pad_right_samples = pad_right_samples
+        self.before_pool_offset = before_pool_offset
+        self.pool_out_dim = self.pool.get_out_dim()
+        self.bn = nn.BatchNorm1d(self.pool_out_dim)
+        self.linear = nn.Linear(self.pool_out_dim, embed_dim)
+        self.embed_dim = embed_dim
+        self.emb_bn = emb_bn
+        if emb_bn:  # better in SSL for SV
+            self.bn2 = nn.BatchNorm1d(embed_dim)
+        else:
+            self.bn2 = None
+
+    def forward(self,x):
+        if self.pad_right_samples is not None:
+            x = torch.nn.functional.pad(x, (0, self.pad_right_samples), mode='constant', value=None)
+        x = self.spec(x)
+            
+        if x.ndim == 3:
+            x = x.unsqueeze(1)
+        # print(f"spec : {x.size()}")
+        out = self.backbone(x)
+        # print(f"pre pool : {out.size()}")
+        if out.ndim == 4:
+            bs, C, F, T = out.size()
+            out = out.reshape(bs, C*F, T)
+        if self.before_pool_offset is not None:
+            out = out[:,:,self.before_pool_offset:]
+        out = self.bn(self.pool(out))
+        out = self.linear(out)
+        
+        if self.bn2 is not None:
+            out = self.bn2(out)
+
+        return out
+
+def ReDimNet2Custom(**kwargs):
+    return ReDimNet2Wrap(**kwargs)

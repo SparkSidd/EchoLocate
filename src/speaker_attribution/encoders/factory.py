@@ -13,6 +13,7 @@ from .campp_encoder import CAMPPEncoder
 from .ecapa_encoder import ECAPAEncoder
 from .eres2netv2_encoder import ERes2NetV2Encoder
 from .mock_encoder import MockAcousticEncoder
+from .redimnet2_encoder import ReDimNet2B0Encoder
 
 ENCODER_REGISTRY: Dict[str, Type[SpeakerEncoder]] = {
     "campp": CAMPPEncoder,
@@ -21,6 +22,9 @@ ENCODER_REGISTRY: Dict[str, Type[SpeakerEncoder]] = {
     "eres2net": ERes2NetV2Encoder,
     "ecapa": ECAPAEncoder,
     "ecapa_tdnn": ECAPAEncoder,
+    "redimnet2_b0": ReDimNet2B0Encoder,
+    "redimnet2-b0": ReDimNet2B0Encoder,
+    "redimnet2": ReDimNet2B0Encoder,
     "mock": MockAcousticEncoder,
 }
 
@@ -35,7 +39,7 @@ def create_encoder(
     Instantiate a speaker encoder by architecture name.
     
     Args:
-        model_name: "campp", "eres2netv2", "ecapa", or "mock"
+        model_name: "campp", "eres2netv2", "ecapa", "redimnet2_b0", or "mock"
         model_path: Optional path to saved model weights (.pt / .pth)
         device: "cpu" or "cuda"
         **kwargs: Additional model-specific hyperparameters
@@ -55,6 +59,8 @@ def create_encoder(
     elif key in ["campp", "cam++"] and "embedding_dim" not in kwargs:
         kwargs["embedding_dim"] = 192
     elif key in ["ecapa", "ecapa_tdnn"] and "embedding_dim" not in kwargs:
+        kwargs["embedding_dim"] = 192
+    elif key in ["redimnet2_b0", "redimnet2-b0", "redimnet2"] and "embedding_dim" not in kwargs:
         kwargs["embedding_dim"] = 192
 
     return cls(model_path=model_path, device=device, **kwargs)
